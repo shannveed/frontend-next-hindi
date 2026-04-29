@@ -17,11 +17,33 @@ const ensureUrl = (value, fallback) => {
   return v.replace(/\/+$/, '');
 };
 
-const RAW_API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL ||
-  'https://api-hi.moviefrost.com';
+const isLocalOrigin = (origin = '') => {
+  try {
+    const host = new URL(origin).hostname;
+    return (
+      host === 'localhost' ||
+      host === '127.0.0.1' ||
+      host === '0.0.0.0'
+    );
+  } catch {
+    return false;
+  }
+};
 
-const API_BASE = ensureUrl(RAW_API_BASE, 'https://api-hi.moviefrost.com')
+const sameOrigin = (a = '', b = '') => {
+  try {
+    const ua = new URL(a);
+    const ub = new URL(b);
+    return ua.protocol === ub.protocol && ua.host === ub.host;
+  } catch {
+    return false;
+  }
+};
+
+const RAW_API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE_URL || 'https://api-hi.moviefrost.com';
+
+let API_BASE = ensureUrl(RAW_API_BASE, 'https://api-hi.moviefrost.com')
   .replace(/\/+$/, '')
   .replace(/\/api$/i, '');
 
@@ -32,6 +54,15 @@ const SITE_URL = ensureUrl(RAW_SITE_URL, 'https://hi.moviefrost.com').replace(
   /\/+$/,
   ''
 );
+
+// Safety: production build me agar galti se localhost/frontend URL API me set ho jaye.
+if (process.env.VERCEL && isLocalOrigin(API_BASE)) {
+  API_BASE = 'https://api-hi.moviefrost.com';
+}
+
+if (sameOrigin(API_BASE, SITE_URL)) {
+  API_BASE = 'https://api-hi.moviefrost.com';
+}
 
 const IMAGE_CACHE =
   'public, max-age=31536000, s-maxage=31536000, immutable';
@@ -85,15 +116,6 @@ const buildCanonicalHostRedirects = () => {
 
     if (isLocal) return redirects;
 
-    /**
-     * English:
-     * NEXT_PUBLIC_SITE_URL=https://www.moviefrost.com
-     * moviefrost.com -> www.moviefrost.com
-     *
-     * Hindi:
-     * NEXT_PUBLIC_SITE_URL=https://hi.moviefrost.com
-     * www.hi.moviefrost.com -> hi.moviefrost.com
-     */
     if (host.startsWith('www.')) {
       redirects.push({
         source: '/:path*',
@@ -161,10 +183,10 @@ const nextConfig = {
   async rewrites() {
     return {
       beforeFiles: [
-        {
-          source: '/api/:path*',
-          destination: `${API_BASE}/api/:path*`,
-        },
+        // IMPORTANT:
+        // /api/:path* rewrite removed.
+        // /api/* is now handled by src/app/api/[...path]/route.js
+        // This prevents production 404 on /api/users/login.
 
         {
           source: '/sitemap.xml',
@@ -194,6 +216,17 @@ const nextConfig = {
 
   async headers() {
     return [
+      {
+        source: '/:path*',
+        headers: [
+          {
+            // Fixes Google OAuth popup COOP warning:
+            // "Cross-Origin-Opener-Policy policy would block the window.closed call"
+            key: 'Cross-Origin-Opener-Policy',
+            value: 'same-origin-allow-popups',
+          },
+        ],
+      },
       {
         source: '/favicon.ico',
         headers: [{ key: 'Cache-Control', value: FAVICON_CACHE }],
