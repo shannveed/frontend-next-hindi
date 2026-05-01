@@ -183,10 +183,7 @@ const nextConfig = {
   async rewrites() {
     return {
       beforeFiles: [
-        // IMPORTANT:
-        // /api/:path* rewrite removed.
-        // /api/* is now handled by src/app/api/[...path]/route.js
-        // This prevents production 404 on /api/users/login.
+        // /api/* is handled by src/app/api/[...path]/route.js
 
         {
           source: '/sitemap.xml',
@@ -196,9 +193,6 @@ const nextConfig = {
           source: '/sitemap-index.xml',
           destination: `${API_BASE}/sitemap-index.xml`,
         },
-
-        // Do NOT rewrite /sitemap-actors.xml.
-        // It is served by frontend route and returns 410.
       ],
     };
   },
@@ -215,18 +209,47 @@ const nextConfig = {
   },
 
   async headers() {
+    const googlePopupSafeHeaders = [
+      {
+        key: 'Cross-Origin-Opener-Policy',
+        value: 'unsafe-none',
+      },
+      {
+        key: 'Cross-Origin-Embedder-Policy',
+        value: 'unsafe-none',
+      },
+    ];
+
     return [
       {
         source: '/:path*',
         headers: [
           {
-            // Fixes Google OAuth popup COOP warning:
-            // "Cross-Origin-Opener-Policy policy would block the window.closed call"
+            // Google OAuth popup safer default.
             key: 'Cross-Origin-Opener-Policy',
             value: 'same-origin-allow-popups',
           },
+          {
+            key: 'Cross-Origin-Embedder-Policy',
+            value: 'unsafe-none',
+          },
         ],
       },
+
+      // Fully silence Google OAuth popup COOP warnings on auth pages.
+      {
+        source: '/login',
+        headers: googlePopupSafeHeaders,
+      },
+      {
+        source: '/register',
+        headers: googlePopupSafeHeaders,
+      },
+      {
+        source: '/signup',
+        headers: googlePopupSafeHeaders,
+      },
+
       {
         source: '/favicon.ico',
         headers: [{ key: 'Cache-Control', value: FAVICON_CACHE }],

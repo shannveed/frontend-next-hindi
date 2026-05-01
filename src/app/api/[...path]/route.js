@@ -5,6 +5,8 @@ export const dynamic = 'force-dynamic';
 const DEFAULT_BACKEND_ORIGIN = 'https://api-hi.moviefrost.com';
 const DEFAULT_FRONTEND_ORIGIN = 'https://hi.moviefrost.com';
 
+const PROXY_TIMEOUT_MS = Number(process.env.API_PROXY_TIMEOUT_MS || 30000);
+
 const stripTrailingSlash = (value = '') => String(value || '').replace(/\/+$/, '');
 
 const ensureUrl = (value, fallback) => {
@@ -62,7 +64,7 @@ const getBackendOrigin = () => {
     DEFAULT_FRONTEND_ORIGIN
   );
 
-  // Safety: agar production me API galti se localhost set ho jaye.
+  // Safety: production me API galti se localhost set ho jaye.
   if (process.env.VERCEL && isLocalOrigin(apiOrigin)) {
     apiOrigin = DEFAULT_BACKEND_ORIGIN;
   }
@@ -127,6 +129,7 @@ const buildResponseHeaders = (upstreamHeaders) => {
 
   // API responses should not be cached by browser/CDN accidentally.
   headers.set('Cache-Control', 'no-store');
+  headers.set('X-Robots-Tag', 'noindex, nofollow');
 
   return headers;
 };
@@ -139,6 +142,9 @@ async function proxyRequest(req, { params }) {
 
   const incomingUrl = new URL(req.url);
   const targetUrl = `${backendOrigin}/api/${apiPath}${incomingUrl.search || ''}`;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), PROXY_TIMEOUT_MS);
 
   try {
     const method = String(req.method || 'GET').toUpperCase();
@@ -154,6 +160,7 @@ async function proxyRequest(req, { params }) {
       body,
       redirect: 'manual',
       cache: 'no-store',
+      signal: controller.signal,
     });
 
     const responseHeaders = buildResponseHeaders(upstream.headers);
@@ -173,19 +180,26 @@ async function proxyRequest(req, { params }) {
         ? upstream.headers.getSetCookie()
         : [];
 
+    const singleSetCookie = upstream.headers.get('set-cookie');
+
     if (setCookies.length) {
       response.headers.delete('set-cookie');
       for (const cookie of setCookies) {
         response.headers.append('set-cookie', cookie);
       }
+    } else if (singleSetCookie) {
+      response.headers.set('set-cookie', singleSetCookie);
     }
 
     return response;
   } catch (error) {
+    const isAbort = error?.name === 'AbortError';
+
     return Response.json(
       {
-        message: 'API proxy failed',
+        message: isAbort ? 'API proxy timeout' : 'API proxy failed',
         error: String(error?.message || error || 'Unknown proxy error'),
+        backendOrigin,
       },
       {
         status: 502,
@@ -195,6 +209,8 @@ async function proxyRequest(req, { params }) {
         },
       }
     );
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -210,6 +226,7 @@ export function OPTIONS() {
     headers: {
       Allow: 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
       'Cache-Control': 'no-store',
+      'X-Robots-Tag': 'noindex, nofollow',
     },
   });
 }
