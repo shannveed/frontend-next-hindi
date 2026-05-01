@@ -16,6 +16,7 @@ const buildQuery = (q = {}) => {
   set('year', q.year);
   set('browseBy', q.browseBy);
   set('search', q.search);
+  set('limit', q.limit);
   set('pageNumber', q.pageNumber || 1);
 
   return p.toString();
@@ -92,7 +93,7 @@ export const getRelatedMoviesAdmin = (token, idOrSlug, limit = 20) => {
 };
 
 /* ============================================================
-   ✅ NEW: Create / Update / Delete / Bulk (Admin pages parity)
+   Create / Update / Delete / Bulk
    ============================================================ */
 
 export const createMovieAdmin = (token, payload) =>
@@ -128,7 +129,7 @@ export const bulkCreateMoviesAdmin = (token, movies = []) =>
     body: { movies },
   });
 
-  export const bulkExactUpdateMoviesAdmin = (token, movies = []) =>
+export const bulkExactUpdateMoviesAdmin = (token, movies = []) =>
   apiFetch('/api/movies/bulk-exact', {
     method: 'PUT',
     token,

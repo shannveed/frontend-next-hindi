@@ -12,6 +12,7 @@ import { SidebarContext } from '../../context/DrawerContext';
 import {
   getBannerMoviesAdmin,
   getLatestNewMoviesAdmin,
+  getMoviesAdmin,
   reorderLatestNewMovies,
   setBannerMovies,
   setLatestNewMovies,
@@ -30,7 +31,6 @@ const ADMIN_HOME_TRENDING_FETCH_LIMIT = 30;
 const ADMIN_HOME_TRENDING_DISPLAY_LIMIT = 24;
 const ADMIN_HOME_LATEST_DISPLAY_LIMIT = 20;
 
-
 export default function HomeAdminPanelClient({
   userInfo = null,
   initialBanner = [],
@@ -41,21 +41,28 @@ export default function HomeAdminPanelClient({
   const { activeMobileTab, activeMobileHomeTab, setActiveMobileHomeTab } =
     useContext(SidebarContext);
 
-
   const token = userInfo?.token || null;
   const isAdmin = !!userInfo?.isAdmin;
 
   // desktop tabs
-  const [activeDesktopTab, setActiveDesktopTab] = useState('latestNew');
+  const [activeDesktopTab, setActiveDesktopTab] = useState('latest');
 
   // data
   const [bannerMovies, setBannerMoviesState] = useState(initialBanner);
   const [latestNewMovies, setLatestNewMoviesState] = useState(initialLatestNew);
+  const [adminLatestMovies, setAdminLatestMovies] = useState(
+    Array.isArray(initialLatestMovies) ? initialLatestMovies : []
+  );
 
   const latestMovies = useMemo(
     () => (Array.isArray(initialLatestMovies) ? initialLatestMovies : []),
     [initialLatestMovies]
   );
+
+  const latestMoviesDisplay = useMemo(() => {
+    const adminList = Array.isArray(adminLatestMovies) ? adminLatestMovies : [];
+    return adminList.length ? adminList : latestMovies;
+  }, [adminLatestMovies, latestMovies]);
 
   const topRated = useMemo(
     () => (Array.isArray(initialTopRated) ? initialTopRated : []),
@@ -89,7 +96,7 @@ export default function HomeAdminPanelClient({
     }
   }, [activeDesktopTab]);
 
-  // admin refresh banner + trending lists
+  // admin refresh banner + trending + latest lists
   useEffect(() => {
     if (!isAdmin || !token) return;
 
@@ -97,13 +104,24 @@ export default function HomeAdminPanelClient({
 
     (async () => {
       try {
-        const [b, t] = await Promise.all([
+        const [b, t, latestRes] = await Promise.all([
           getBannerMoviesAdmin(token, 10),
           getLatestNewMoviesAdmin(token, ADMIN_HOME_TRENDING_FETCH_LIMIT),
+          getMoviesAdmin(token, {
+            pageNumber: 1,
+            limit: ADMIN_HOME_LATEST_DISPLAY_LIMIT,
+          }).catch(() => ({ movies: [] })),
         ]);
+
         if (cancelled) return;
+
         setBannerMoviesState(Array.isArray(b) ? b : []);
         setLatestNewMoviesState(Array.isArray(t) ? t : []);
+        setAdminLatestMovies(
+          Array.isArray(latestRes?.movies)
+            ? latestRes.movies.slice(0, ADMIN_HOME_LATEST_DISPLAY_LIMIT)
+            : []
+        );
       } catch {
         // ignore (keep initial server/public lists)
       }
@@ -129,12 +147,11 @@ export default function HomeAdminPanelClient({
   const trendingDisplay =
     isAdmin && editTrending && localOrder.length ? localOrder : latestNewMovies;
 
-  // CRA-like banner fallback
   const bannerFeed = useMemo(() => {
     const curated = Array.isArray(bannerMovies) ? bannerMovies : [];
     if (curated.length > 0) return curated;
-    return Array.isArray(latestMovies) ? latestMovies : [];
-  }, [bannerMovies, latestMovies]);
+    return Array.isArray(latestMoviesDisplay) ? latestMoviesDisplay : [];
+  }, [bannerMovies, latestMoviesDisplay]);
 
   const canRemoveFromBanner =
     isAdmin && !!token && Array.isArray(bannerMovies) && bannerMovies.length > 0;
@@ -220,8 +237,8 @@ export default function HomeAdminPanelClient({
           key={t.key}
           onClick={() => setActiveDesktopTab(t.key)}
           className={`px-6 py-2.5 rounded-md font-semibold text-sm transitions ${activeDesktopTab === t.key
-            ? 'bg-customPurple text-white'
-            : 'bg-dry text-white hover:bg-customPurple/20 border border-border'
+              ? 'bg-customPurple text-white'
+              : 'bg-dry text-white hover:bg-customPurple/20 border border-border'
             }`}
           type="button"
         >
@@ -252,8 +269,8 @@ export default function HomeAdminPanelClient({
                 type="button"
                 onClick={() => setEditTrending((p) => !p)}
                 className={`px-4 py-2 text-sm rounded border transitions ${editTrending
-                  ? 'bg-customPurple border-customPurple text-white'
-                  : 'border-customPurple text-white hover:bg-customPurple'
+                    ? 'bg-customPurple border-customPurple text-white'
+                    : 'border-customPurple text-white hover:bg-customPurple'
                   }`}
               >
                 {editTrending ? 'Exit Edit Trending' : 'Edit Trending Order'}
@@ -275,42 +292,50 @@ export default function HomeAdminPanelClient({
 
         <div
           className={`grid ${mobile
-            ? 'grid-cols-2 gap-2'
-            : 'xl:grid-cols-5 lg:grid-cols-4 md:grid-cols-3 gap-4'
+              ? 'grid-cols-2 gap-2'
+              : 'xl:grid-cols-5 lg:grid-cols-4 md:grid-cols-3 gap-4'
             }`}
         >
-          {trendingDisplay.slice(0, ADMIN_HOME_TRENDING_DISPLAY_LIMIT).map((m) => (
-            <div key={m._id} className="relative">
-              {isAdmin && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    handleRemoveFromTrending(m._id);
-                  }}
-                  disabled={removingLatestNewId === m._id}
-                  className="absolute top-2 right-2 z-30 w-9 h-9 flex-colo rounded-full bg-red-600/85 hover:bg-red-600 text-white disabled:opacity-60"
-                >
-                  {removingLatestNewId === m._id ? (
-                    <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  ) : (
-                    <IoClose className="text-xl" />
-                  )}
-                </button>
-              )}
+          {trendingDisplay
+            .slice(0, ADMIN_HOME_TRENDING_DISPLAY_LIMIT)
+            .map((m) => (
+              <div key={m._id} className="relative">
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      handleRemoveFromTrending(m._id);
+                    }}
+                    disabled={removingLatestNewId === m._id}
+                    className="absolute top-2 right-2 z-30 w-9 h-9 flex-colo rounded-full bg-red-600/85 hover:bg-red-600 text-white disabled:opacity-60"
+                  >
+                    {removingLatestNewId === m._id ? (
+                      <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <IoClose className="text-xl" />
+                    )}
+                  </button>
+                )}
 
-              <div
-                draggable={isAdmin && editTrending}
-                onDragStart={(e) => onDragStart(e, m._id)}
-                onDragEnter={(e) => onDragEnter(e, m._id)}
-                onDragOver={(e) => (isAdmin && editTrending ? e.preventDefault() : null)}
-                className={isAdmin && editTrending ? 'cursor-grab active:cursor-grabbing' : ''}
-              >
-                <MovieCard movie={m} />
+                <div
+                  draggable={isAdmin && editTrending}
+                  onDragStart={(e) => onDragStart(e, m._id)}
+                  onDragEnter={(e) => onDragEnter(e, m._id)}
+                  onDragOver={(e) =>
+                    isAdmin && editTrending ? e.preventDefault() : null
+                  }
+                  className={
+                    isAdmin && editTrending
+                      ? 'cursor-grab active:cursor-grabbing'
+                      : ''
+                  }
+                >
+                  <MovieCard movie={m} />
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
         </div>
 
         <div className="flex justify-center mt-10">
@@ -332,9 +357,10 @@ export default function HomeAdminPanelClient({
   };
 
   const LatestGrid = ({ mobile = false }) => {
-    const list = Array.isArray(latestMovies)
-      ? latestMovies.slice(0, ADMIN_HOME_LATEST_DISPLAY_LIMIT)
+    const list = Array.isArray(latestMoviesDisplay)
+      ? latestMoviesDisplay.slice(0, ADMIN_HOME_LATEST_DISPLAY_LIMIT)
       : [];
+
     if (!list.length) {
       return (
         <div className="w-full gap-6 flex-colo py-12">
@@ -350,8 +376,8 @@ export default function HomeAdminPanelClient({
       <>
         <div
           className={`grid ${mobile
-            ? 'grid-cols-2 gap-2'
-            : 'xl:grid-cols-5 lg:grid-cols-4 md:grid-cols-3 gap-4'
+              ? 'grid-cols-2 gap-2'
+              : 'xl:grid-cols-5 lg:grid-cols-4 md:grid-cols-3 gap-4'
             }`}
         >
           {list.map((m) => (
@@ -403,10 +429,19 @@ export default function HomeAdminPanelClient({
           'Bollywood Web Series',
         ]}
       />
-      <BrowseSwiperSection title="Korean Drama" browseByValues={['Korean Drama (Korean)']} />
+      <BrowseSwiperSection
+        title="Korean Drama"
+        browseByValues={['Korean Drama (Korean)']}
+      />
       <BrowseSwiperSection title="Korean" browseByValues={['Korean (English)']} />
-      <BrowseSwiperSection title="Korean Hindi" browseByValues={['Korean (Hindi Dubbed)']} />
-      <BrowseSwiperSection title="Chinese Drama" browseByValues={['Chinease Drama']} />
+      <BrowseSwiperSection
+        title="Korean Hindi"
+        browseByValues={['Korean (Hindi Dubbed)']}
+      />
+      <BrowseSwiperSection
+        title="Chinese Drama"
+        browseByValues={['Chinease Drama']}
+      />
       <BrowseSwiperSection
         title="Japanese"
         browseByValues={[
@@ -416,9 +451,18 @@ export default function HomeAdminPanelClient({
         ]}
         excludeBrowseByValues={['Japanese Web Series (Hindi)']}
       />
-      <BrowseSwiperSection title="Japanese Anime" browseByValues={['Japanese Anime']} />
-      <BrowseSwiperSection title="South Indian" browseByValues={['South Indian (Hindi Dubbed)']} />
-      <BrowseSwiperSection title="Punjabi" browseByValues={['Indian Punjabi Movies']} />
+      <BrowseSwiperSection
+        title="Japanese Anime"
+        browseByValues={['Japanese Anime']}
+      />
+      <BrowseSwiperSection
+        title="South Indian"
+        browseByValues={['South Indian (Hindi Dubbed)']}
+      />
+      <BrowseSwiperSection
+        title="Punjabi"
+        browseByValues={['Indian Punjabi Movies']}
+      />
 
       {mobile ? (
         <EffectiveGateSquareAd refreshKey="home-mobile-browseby" className="px-0" />
@@ -432,8 +476,8 @@ export default function HomeAdminPanelClient({
         <h3 className="text-lg font-semibold mb-4">Top Rated</h3>
         <div
           className={`grid ${mobile
-            ? 'grid-cols-2 gap-2'
-            : 'xl:grid-cols-5 lg:grid-cols-4 md:grid-cols-3 gap-4'
+              ? 'grid-cols-2 gap-2'
+              : 'xl:grid-cols-5 lg:grid-cols-4 md:grid-cols-3 gap-4'
             }`}
         >
           {topRated.slice(0, 10).map((m) => (
@@ -453,7 +497,9 @@ export default function HomeAdminPanelClient({
       {showBanner ? (
         <BannerSlider
           movies={bannerFeed}
-          onRemoveFromBanner={canRemoveFromBanner ? handleRemoveFromBanner : undefined}
+          onRemoveFromBanner={
+            canRemoveFromBanner ? handleRemoveFromBanner : undefined
+          }
           removingBannerId={removingBannerId}
         />
       ) : null}
@@ -469,8 +515,8 @@ export default function HomeAdminPanelClient({
                 type="button"
                 onClick={() => setActiveMobileHomeTab('latestNew')}
                 className={`flex-1 px-3 py-2 rounded-md text-sm font-semibold border transitions ${activeMobileHomeTab === 'latestNew'
-                  ? 'bg-customPurple text-white border-customPurple'
-                  : 'bg-dry text-white border-border'
+                    ? 'bg-customPurple text-white border-customPurple'
+                    : 'bg-dry text-white border-border'
                   }`}
               >
                 Trending
@@ -480,8 +526,8 @@ export default function HomeAdminPanelClient({
                 type="button"
                 onClick={() => setActiveMobileHomeTab('latestMovies')}
                 className={`flex-1 px-3 py-2 rounded-md text-sm font-semibold border transitions ${activeMobileHomeTab === 'latestMovies'
-                  ? 'bg-customPurple text-white border-customPurple'
-                  : 'bg-dry text-white border-border'
+                    ? 'bg-customPurple text-white border-customPurple'
+                    : 'bg-dry text-white border-border'
                   }`}
               >
                 New Releases

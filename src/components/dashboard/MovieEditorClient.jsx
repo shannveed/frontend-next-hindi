@@ -21,6 +21,7 @@ import {
 import {
   createMovieAdmin,
   getMovieByIdAdmin,
+  moveMoviesToPage,
   updateMovieAdmin,
 } from '../../lib/client/moviesAdmin';
 
@@ -78,7 +79,7 @@ const emptyForm = {
   director: '',
   imdbId: '',
 
-  // ✅ NEW (Q1)
+  // trailer + FAQ
   trailerUrl: '',
   faqs: [],
 
@@ -132,18 +133,24 @@ function EditorInner({ mode, movieId, token }) {
   const [posterImage, setPosterImage] = useState('');
   const [titleImage, setTitleImage] = useState('');
 
-  // ✅ Always keep real DB _id for update calls even when URL param is slug
+  // real DB _id for update calls even when URL param is slug
   const [dbId, setDbId] = useState(null);
 
-  // ✅ Show + use slug (edit URL should be /edit/<slug>)
+  // show + use slug
   const [currentSlug, setCurrentSlug] = useState('');
 
   const [form, setForm] = useState({ ...emptyForm });
+  const [originalFlags, setOriginalFlags] = useState({
+    isPublished: false,
+    latest: false,
+    previousHit: false,
+  });
 
   const hasVideoUrl7 = useMemo(
     () => !!String(form.videoUrl7 || '').trim(),
     [form.videoUrl7]
   );
+
   const browseByOptions = useMemo(() => {
     const distinct = Array.isArray(browseByDistinct)
       ? browseByDistinct.filter((x) => String(x || '').trim())
@@ -168,7 +175,6 @@ function EditorInner({ mode, movieId, token }) {
         };
       }
 
-      // Movie
       return {
         ...base,
         episodes: [],
@@ -225,7 +231,7 @@ function EditorInner({ mode, movieId, token }) {
     }));
   };
 
-  // ✅ FAQ helpers (Q1)
+  // FAQ helpers
   const updateFaq = (idx, k, v) => {
     setForm((p) => {
       const faqs = Array.isArray(p.faqs) ? [...p.faqs] : [];
@@ -251,7 +257,6 @@ function EditorInner({ mode, movieId, token }) {
     }));
   };
 
-  // Load categories + browseBy + movie(for edit)
   useEffect(() => {
     let cancelled = false;
 
@@ -275,6 +280,11 @@ function EditorInner({ mode, movieId, token }) {
           setTitleImage('');
           setDbId(null);
           setCurrentSlug('');
+          setOriginalFlags({
+            isPublished: false,
+            latest: false,
+            previousHit: false,
+          });
           return;
         }
 
@@ -286,17 +296,21 @@ function EditorInner({ mode, movieId, token }) {
           return;
         }
 
-        // ✅ store dbId always (used for PUT)
         setDbId(m._id || null);
 
-        // ✅ slug display + URL normalization
         const slug = String(m.slug || '').trim();
         setCurrentSlug(slug);
 
-        // If user opened /edit/<ObjectId>, convert to /edit/<slug>
         if (slug && isLikelyObjectId(movieId) && slug !== movieId) {
           router.replace(`/edit/${slug}`, { scroll: false });
         }
+
+        setOriginalFlags({
+          isPublished:
+            typeof m.isPublished === 'boolean' ? m.isPublished : true,
+          latest: !!m.latest,
+          previousHit: !!m.previousHit,
+        });
 
         setPosterImage(m.image || '');
         setTitleImage(m.titleImage || '');
@@ -304,31 +318,30 @@ function EditorInner({ mode, movieId, token }) {
         const formattedEpisodes =
           m.type === 'WebSeries' && Array.isArray(m.episodes)
             ? m.episodes.map((ep) => ({
-                _id: ep._id,
-                seasonNumber: ep.seasonNumber || 1,
-                episodeNumber: ep.episodeNumber || 1,
-                title: ep.title || '',
-                duration: ep.duration ? formatMinutesToDuration(ep.duration) : '',
-                desc: ep.desc || '',
-                video: ep.video || '',
-                videoUrl2: ep.videoUrl2 || '',
-                videoUrl3: ep.videoUrl3 || '',
-              }))
+              _id: ep._id,
+              seasonNumber: ep.seasonNumber || 1,
+              episodeNumber: ep.episodeNumber || 1,
+              title: ep.title || '',
+              duration: ep.duration ? formatMinutesToDuration(ep.duration) : '',
+              desc: ep.desc || '',
+              video: ep.video || '',
+              videoUrl2: ep.videoUrl2 || '',
+              videoUrl3: ep.videoUrl3 || '',
+            }))
             : [];
 
         const formattedCasts = Array.isArray(m.casts)
           ? m.casts.map((c) => ({
-              name: c?.name || '',
-              image: c?.image || '',
-            }))
+            name: c?.name || '',
+            image: c?.image || '',
+          }))
           : [];
 
-        // ✅ Q1: FAQs
         const formattedFaqs = Array.isArray(m.faqs)
           ? m.faqs.map((f) => ({
-              question: String(f?.question || ''),
-              answer: String(f?.answer || ''),
-            }))
+            question: String(f?.question || ''),
+            answer: String(f?.answer || ''),
+          }))
           : [];
 
         setForm({
@@ -347,7 +360,6 @@ function EditorInner({ mode, movieId, token }) {
           imdbId: m.imdbId || '',
           casts: formattedCasts,
 
-          // ✅ Q1
           trailerUrl: m.trailerUrl || '',
           faqs: formattedFaqs,
 
@@ -369,7 +381,6 @@ function EditorInner({ mode, movieId, token }) {
             typeof m.isPublished === 'boolean' ? m.isPublished : true,
         });
 
-        // if webseries but no episodes, ensure one row
         if (m.type === 'WebSeries' && formattedEpisodes.length === 0) {
           setForm((p) => ({ ...p, episodes: [emptyEpisode(1)] }));
         }
@@ -431,7 +442,6 @@ function EditorInner({ mode, movieId, token }) {
       return null;
     }
 
-    // ✅ Q1: Trailer URL validation
     const trailerUrl = String(form.trailerUrl || '').trim();
     if (!isValidHttpUrlOrEmpty(trailerUrl)) {
       toast.error('Trailer URL must start with http:// or https://');
@@ -442,7 +452,6 @@ function EditorInner({ mode, movieId, token }) {
       return null;
     }
 
-    // ✅ Q1: FAQ validation (optional, max 5)
     const faqsRaw = Array.isArray(form.faqs) ? form.faqs : [];
     const faqClean = faqsRaw
       .map((f) => ({
@@ -467,7 +476,6 @@ function EditorInner({ mode, movieId, token }) {
         answer: f.answer.substring(0, 800),
       }));
 
-    // ✅ Casts validation (optional, but if provided must be complete)
     const castsRaw = Array.isArray(form.casts) ? form.casts : [];
     const normalizedCasts = castsRaw.map((c) => ({
       name: String(c?.name || '').trim(),
@@ -498,12 +506,12 @@ function EditorInner({ mode, movieId, token }) {
       language: form.language.trim(),
       year,
       time: totalMinutes,
-      videoUrl7: String(form.videoUrl7 || '').trim(),  
+      videoUrl7: String(form.videoUrl7 || '').trim(),
+
       director: String(form.director || '').trim(),
       imdbId,
       casts,
 
-      // ✅ Q1
       trailerUrl,
       faqs,
 
@@ -534,7 +542,6 @@ function EditorInner({ mode, movieId, token }) {
       };
     }
 
-    // WebSeries
     const eps = Array.isArray(form.episodes) ? form.episodes : [];
     if (!eps.length) {
       toast.error('Please add at least one episode.');
@@ -599,6 +606,14 @@ function EditorInner({ mode, movieId, token }) {
     }
   };
 
+  const autoPlaceOnFirstPage = async (movieId) => {
+    const safeId = String(movieId || '').trim();
+    if (!safeId || !token) return false;
+
+    await moveMoviesToPage(token, 1, [safeId]);
+    return true;
+  };
+
   const onSubmit = async (e) => {
     e.preventDefault();
 
@@ -615,13 +630,30 @@ function EditorInner({ mode, movieId, token }) {
       setSaving(true);
 
       if (isEdit) {
-        // ✅ IMPORTANT: update by REAL _id (dbId) so slug URL doesn't break update
         const targetId = dbId || movieId;
 
         const updated = await updateMovieAdmin(token, targetId, payload);
-        toast.success('Updated successfully');
 
-        // ✅ update slug + URL if name/year changed
+        let autoPlaced = false;
+        const shouldAutoPlaceDraft =
+          !originalFlags.previousHit &&
+          !originalFlags.latest &&
+          originalFlags.isPublished === false &&
+          !payload.previousHit &&
+          !payload.latest;
+
+        if (shouldAutoPlaceDraft) {
+          try {
+            await autoPlaceOnFirstPage(updated?._id || targetId);
+            autoPlaced = true;
+          } catch (e2) {
+            console.warn(
+              '[movie-editor] auto place after update failed:',
+              e2?.message || e2
+            );
+          }
+        }
+
         const nextSlug = String(updated?.slug || '').trim();
         if (nextSlug) {
           setCurrentSlug(nextSlug);
@@ -629,16 +661,71 @@ function EditorInner({ mode, movieId, token }) {
             router.replace(`/edit/${nextSlug}`, { scroll: false });
           }
         }
-      } else {
-        await createMovieAdmin(token, payload);
-        toast.success('Created successfully');
 
-        // reset like CRA AddMovie
+        setOriginalFlags({
+          isPublished:
+            typeof updated?.isPublished === 'boolean'
+              ? updated.isPublished
+              : !!payload.isPublished,
+          latest:
+            autoPlaced
+              ? true
+              : typeof updated?.latest === 'boolean'
+                ? updated.latest
+                : !!payload.latest,
+          previousHit:
+            autoPlaced
+              ? false
+              : typeof updated?.previousHit === 'boolean'
+                ? updated.previousHit
+                : !!payload.previousHit,
+        });
+
+        if (autoPlaced) {
+          setForm((prev) => ({
+            ...prev,
+            latest: true,
+            previousHit: false,
+          }));
+          toast.success('Updated successfully and moved to page 1');
+        } else {
+          toast.success('Updated successfully');
+        }
+      } else {
+        const created = await createMovieAdmin(token, payload);
+
+        let autoPlaced = false;
+        const shouldAutoPlaceNew =
+          !payload.previousHit && !payload.latest && created?._id;
+
+        if (shouldAutoPlaceNew) {
+          try {
+            await autoPlaceOnFirstPage(created._id);
+            autoPlaced = true;
+          } catch (e2) {
+            console.warn(
+              '[movie-editor] auto place after create failed:',
+              e2?.message || e2
+            );
+          }
+        }
+
+        toast.success(
+          autoPlaced
+            ? 'Created successfully and moved to page 1'
+            : 'Created successfully'
+        );
+
         setForm({ ...emptyForm });
         setPosterImage('');
         setTitleImage('');
         setDbId(null);
         setCurrentSlug('');
+        setOriginalFlags({
+          isPublished: false,
+          latest: false,
+          previousHit: false,
+        });
       }
     } catch (err) {
       toast.error(err?.message || 'Save failed');
@@ -664,7 +751,6 @@ function EditorInner({ mode, movieId, token }) {
         {isEdit ? 'Edit Movie / Web Series' : 'Create Movie / Web Series'}
       </h2>
 
-      {/* ✅ Slug display + quick links */}
       {isEdit && currentSlug ? (
         <div className="bg-main border border-border rounded-lg p-4 mb-6">
           <h3 className="font-semibold mb-2">Slug</h3>
@@ -709,7 +795,6 @@ function EditorInner({ mode, movieId, token }) {
       ) : null}
 
       <form onSubmit={onSubmit} className="space-y-6">
-        {/* Type */}
         <div>
           <label className="text-sm text-border font-semibold">Type</label>
           <select
@@ -722,7 +807,6 @@ function EditorInner({ mode, movieId, token }) {
           </select>
         </div>
 
-        {/* Basic fields */}
         <div className="grid md:grid-cols-2 gap-4">
           <div>
             <label className="text-sm text-border font-semibold">Name</label>
@@ -768,7 +852,6 @@ function EditorInner({ mode, movieId, token }) {
           </div>
         </div>
 
-        {/* Images */}
         <div className="grid md:grid-cols-2 gap-6">
           <div className="bg-main border border-border rounded-lg p-4">
             <p className="text-sm font-semibold mb-2">
@@ -813,7 +896,6 @@ function EditorInner({ mode, movieId, token }) {
           </div>
         </div>
 
-        {/* Category + BrowseBy */}
         <div className="grid md:grid-cols-2 gap-4">
           <div>
             <label className="text-sm text-border font-semibold">Category</label>
@@ -848,7 +930,6 @@ function EditorInner({ mode, movieId, token }) {
           </div>
         </div>
 
-        {/* Thumbnail + Director + IMDb */}
         <div className="grid md:grid-cols-2 gap-4">
           <div>
             <label className="text-sm text-border font-semibold">
@@ -891,7 +972,6 @@ function EditorInner({ mode, movieId, token }) {
           </div>
         </div>
 
-        {/* Description */}
         <div>
           <label className="text-sm text-border font-semibold">Description</label>
           <textarea
@@ -902,7 +982,6 @@ function EditorInner({ mode, movieId, token }) {
           />
         </div>
 
-        {/* ✅ NEW (Q1): Trailer + FAQ */}
         <div className="bg-main border border-border rounded-lg p-4 space-y-4">
           <h3 className="font-semibold">Trailer & FAQ (optional)</h3>
 
@@ -996,7 +1075,6 @@ function EditorInner({ mode, movieId, token }) {
           </div>
         </div>
 
-        {/* SEO */}
         <div className="grid md:grid-cols-2 gap-4">
           <div>
             <label className="text-sm text-border font-semibold">
@@ -1033,7 +1111,6 @@ function EditorInner({ mode, movieId, token }) {
           </div>
         </div>
 
-        {/* Flags */}
         <div className="bg-main border border-border rounded-lg p-4">
           <h3 className="font-semibold mb-3">Visibility & Flags</h3>
 
@@ -1074,7 +1151,6 @@ function EditorInner({ mode, movieId, token }) {
           </div>
         </div>
 
-        {/* Casts */}
         <div className="bg-main border border-border rounded-lg p-4 space-y-4">
           <div className="flex items-center justify-between gap-3">
             <h3 className="font-semibold">Casts (optional)</h3>
@@ -1172,7 +1248,6 @@ function EditorInner({ mode, movieId, token }) {
           </p>
         </div>
 
-        {/* Movie servers */}
         {form.type === 'Movie' ? (
           <div className="bg-main border border-border rounded-lg p-4 space-y-4">
             <h3 className="font-semibold">Movie Servers</h3>
@@ -1180,7 +1255,6 @@ function EditorInner({ mode, movieId, token }) {
             <div className="grid md:grid-cols-2 gap-4">
               <div>
                 <label className="text-sm text-border font-semibold">
-                  Server 1 URL *
                   {hasVideoUrl7 ? 'Server 2 URL *' : 'Server 1 URL *'}
                 </label>
                 <input
@@ -1193,7 +1267,6 @@ function EditorInner({ mode, movieId, token }) {
 
               <div>
                 <label className="text-sm text-border font-semibold">
-                  Server 2 URL *
                   {hasVideoUrl7 ? 'Server 3 URL *' : 'Server 2 URL *'}
                 </label>
                 <input
@@ -1206,7 +1279,6 @@ function EditorInner({ mode, movieId, token }) {
 
               <div>
                 <label className="text-sm text-border font-semibold">
-                  Server 3 URL *
                   {hasVideoUrl7 ? 'Server 4 URL *' : 'Server 3 URL *'}
                 </label>
                 <input
@@ -1228,6 +1300,7 @@ function EditorInner({ mode, movieId, token }) {
                   placeholder="https://..."
                 />
               </div>
+
               <div className="md:col-span-2">
                 <label className="text-sm text-border font-semibold">
                   Server 1 URL (videoUrl7) (optional)
@@ -1246,7 +1319,6 @@ function EditorInner({ mode, movieId, token }) {
           </div>
         ) : null}
 
-        {/* WebSeries episodes */}
         {form.type === 'WebSeries' ? (
           <div className="bg-main border border-border rounded-lg p-4 space-y-4">
             <div className="flex items-center justify-between">
@@ -1259,21 +1331,22 @@ function EditorInner({ mode, movieId, token }) {
                 Add Episode
               </button>
             </div>
-            {/* ✅ NEW (Q1): optional "all episodes" server */}
-           <div className="bg-dry border border-border rounded-lg p-4">
-             <label className="text-sm text-border font-semibold">
-               Server 1 URL (videoUrl7) (optional)
-             </label>
-             <input
-               value={form.videoUrl7}
-               onChange={(e) => setField('videoUrl7', e.target.value)}
-               className={`${inputClass} mt-2`}
-               placeholder="https://..."
-             />
-             <p className="text-xs text-dryGray mt-1">
-               If provided, Watch page hides the episode list when Server 1 is selected.
-             </p>
-           </div>
+
+            <div className="bg-dry border border-border rounded-lg p-4">
+              <label className="text-sm text-border font-semibold">
+                Server 1 URL (videoUrl7) (optional)
+              </label>
+              <input
+                value={form.videoUrl7}
+                onChange={(e) => setField('videoUrl7', e.target.value)}
+                className={`${inputClass} mt-2`}
+                placeholder="https://..."
+              />
+              <p className="text-xs text-dryGray mt-1">
+                If provided, Watch page hides the episode list when Server 1 is selected.
+              </p>
+            </div>
+
             {form.episodes.length === 0 ? (
               <p className="text-sm text-border">No episodes yet.</p>
             ) : (
@@ -1353,7 +1426,6 @@ function EditorInner({ mode, movieId, token }) {
 
                       <div>
                         <label className="text-sm text-border font-semibold">
-                          Server 1 *
                           {hasVideoUrl7 ? 'Server 2 *' : 'Server 1 *'}
                         </label>
                         <input
@@ -1368,7 +1440,6 @@ function EditorInner({ mode, movieId, token }) {
 
                       <div>
                         <label className="text-sm text-border font-semibold">
-                          Server 2 *
                           {hasVideoUrl7 ? 'Server 3 *' : 'Server 2 *'}
                         </label>
                         <input
@@ -1383,7 +1454,6 @@ function EditorInner({ mode, movieId, token }) {
 
                       <div>
                         <label className="text-sm text-border font-semibold">
-                          Server 3 *
                           {hasVideoUrl7 ? 'Server 4 *' : 'Server 3 *'}
                         </label>
                         <input
@@ -1416,7 +1486,6 @@ function EditorInner({ mode, movieId, token }) {
           </div>
         ) : null}
 
-        {/* Submit */}
         <button
           type="submit"
           disabled={saving}

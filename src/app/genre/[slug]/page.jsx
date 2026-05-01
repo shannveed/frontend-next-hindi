@@ -4,14 +4,28 @@ import { notFound } from 'next/navigation';
 import MoviesClient from '../../../components/movies/MoviesClient';
 import SeoLandingHero from '../../../components/movies/SeoLandingHero';
 
-import { getBrowseByDistinct, getCategories, getMovies } from '../../../lib/api';
+import {
+  getBrowseByDistinct,
+  getCategories,
+  getMovies,
+  hasListingPageContent,
+} from '../../../lib/api';
+import { resolveListingPageForRequest } from '../../../lib/server/adminListingPreview';
 import {
   buildGenrePageMeta,
   slugifySegment,
 } from '../../../lib/discoveryPages';
 
 export const revalidate = 3600;
+export const dynamic = 'auto';
 export const dynamicParams = true;
+
+const EMPTY_DATA = {
+  movies: [],
+  page: 1,
+  pages: 1,
+  totalMovies: 0,
+};
 
 const pickCategoryBySlug = (categories = [], slug = '') => {
   const target = String(slug || '').trim().toLowerCase();
@@ -58,15 +72,20 @@ export default async function GenrePage({ params }) {
   const category = pickCategoryBySlug(categories, params.slug);
   if (!category) notFound();
 
-  const data = await getMovies(
+  const publicData = await getMovies(
     {
       category: category.title,
       pageNumber: 1,
     },
     { revalidate: 300 }
-  ).catch(() => ({ movies: [], page: 1, pages: 1, totalMovies: 0 }));
+  ).catch(() => EMPTY_DATA);
 
-  if (!Array.isArray(data?.movies) || data.movies.length === 0) {
+  const { data } = await resolveListingPageForRequest(publicData, {
+    category: category.title,
+    pageNumber: 1,
+  });
+
+  if (!hasListingPageContent(data, 1)) {
     notFound();
   }
 

@@ -4,7 +4,13 @@ import { notFound } from 'next/navigation';
 import MoviesClient from '../../../components/movies/MoviesClient';
 import SeoLandingHero from '../../../components/movies/SeoLandingHero';
 
-import { getBrowseByDistinct, getCategories, getMovies } from '../../../lib/api';
+import {
+  getBrowseByDistinct,
+  getCategories,
+  getMovies,
+  hasListingPageContent,
+} from '../../../lib/api';
+import { resolveListingPageForRequest } from '../../../lib/server/adminListingPreview';
 import {
   buildLanguagePageMeta,
   slugifySegment,
@@ -12,7 +18,15 @@ import {
 import { LanguageData } from '../../../data/filterData';
 
 export const revalidate = 3600;
+export const dynamic = 'auto';
 export const dynamicParams = true;
+
+const EMPTY_DATA = {
+  movies: [],
+  page: 1,
+  pages: 1,
+  totalMovies: 0,
+};
 
 const SUPPORTED_LANGUAGES = LanguageData.map((item) =>
   String(item?.title || '').trim()
@@ -56,7 +70,7 @@ export default async function LanguagePage({ params }) {
   const language = pickLanguageBySlug(params.slug);
   if (!language) notFound();
 
-  const [categories, browseByDistinct, data] = await Promise.all([
+  const [categories, browseByDistinct, publicData] = await Promise.all([
     getCategories({ revalidate: 3600 }).catch(() => []),
     getBrowseByDistinct({ revalidate: 3600 }).catch(() => []),
     getMovies(
@@ -65,10 +79,15 @@ export default async function LanguagePage({ params }) {
         pageNumber: 1,
       },
       { revalidate: 300 }
-    ).catch(() => ({ movies: [], page: 1, pages: 1, totalMovies: 0 })),
+    ).catch(() => EMPTY_DATA),
   ]);
 
-  if (!Array.isArray(data?.movies) || data.movies.length === 0) {
+  const { data } = await resolveListingPageForRequest(publicData, {
+    language,
+    pageNumber: 1,
+  });
+
+  if (!hasListingPageContent(data, 1)) {
     notFound();
   }
 

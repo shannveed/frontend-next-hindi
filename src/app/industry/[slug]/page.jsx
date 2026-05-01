@@ -1,10 +1,16 @@
 // frontend-next/src/app/industry/[slug]/page.jsx
-import { notFound, permanentRedirect } from 'next/navigation';
+import { notFound } from 'next/navigation';
 
 import MoviesClient from '../../../components/movies/MoviesClient';
 import SeoLandingHero from '../../../components/movies/SeoLandingHero';
 
-import { getBrowseByDistinct, getCategories, getMovies } from '../../../lib/api';
+import {
+  getBrowseByDistinct,
+  getCategories,
+  getMovies,
+  hasListingPageContent,
+} from '../../../lib/api';
+import { resolveListingPageForRequest } from '../../../lib/server/adminListingPreview';
 import {
   INDUSTRY_PAGES,
   buildIndustryPageMeta,
@@ -12,7 +18,15 @@ import {
 } from '../../../lib/discoveryPages';
 
 export const revalidate = 3600;
+export const dynamic = 'auto';
 export const dynamicParams = true;
+
+const EMPTY_DATA = {
+  movies: [],
+  page: 1,
+  pages: 1,
+  totalMovies: 0,
+};
 
 export async function generateStaticParams() {
   return INDUSTRY_PAGES.map((page) => ({ slug: page.slug }));
@@ -42,13 +56,7 @@ export default async function IndustryPage({ params }) {
   const industry = getIndustryBySlug(params.slug);
   if (!industry) notFound();
 
-  // ✅ Alias support:
-  // /industry/bollywood-hindi -> /industry/bollywood
-  if (params.slug !== industry.slug) {
-    permanentRedirect(`/industry/${industry.slug}`);
-  }
-
-  const [categories, browseByDistinct, data] = await Promise.all([
+  const [categories, browseByDistinct, publicData] = await Promise.all([
     getCategories({ revalidate: 3600 }).catch(() => []),
     getBrowseByDistinct({ revalidate: 3600 }).catch(() => []),
     getMovies(
@@ -57,10 +65,15 @@ export default async function IndustryPage({ params }) {
         pageNumber: 1,
       },
       { revalidate: 300 }
-    ).catch(() => ({ movies: [], page: 1, pages: 1, totalMovies: 0 })),
+    ).catch(() => EMPTY_DATA),
   ]);
 
-  if (!Array.isArray(data?.movies) || data.movies.length === 0) {
+  const { data } = await resolveListingPageForRequest(publicData, {
+    browseBy: industry.browseByValues.join(','),
+    pageNumber: 1,
+  });
+
+  if (!hasListingPageContent(data, 1)) {
     notFound();
   }
 

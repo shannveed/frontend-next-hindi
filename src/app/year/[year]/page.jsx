@@ -4,12 +4,26 @@ import { notFound } from 'next/navigation';
 import MoviesClient from '../../../components/movies/MoviesClient';
 import SeoLandingHero from '../../../components/movies/SeoLandingHero';
 
-import { getBrowseByDistinct, getCategories, getMovies } from '../../../lib/api';
+import {
+  getBrowseByDistinct,
+  getCategories,
+  getMovies,
+  hasListingPageContent,
+} from '../../../lib/api';
+import { resolveListingPageForRequest } from '../../../lib/server/adminListingPreview';
 import { buildYearPageMeta } from '../../../lib/discoveryPages';
 import { YearData } from '../../../data/filterData';
 
 export const revalidate = 3600;
+export const dynamic = 'auto';
 export const dynamicParams = true;
+
+const EMPTY_DATA = {
+  movies: [],
+  page: 1,
+  pages: 1,
+  totalMovies: 0,
+};
 
 const SUPPORTED_YEARS = YearData.map((item) =>
   String(item?.title || '').trim()
@@ -45,7 +59,7 @@ export default async function YearPage({ params }) {
   const year = String(params?.year || '').trim();
   if (!isValidYear(year)) notFound();
 
-  const [categories, browseByDistinct, data] = await Promise.all([
+  const [categories, browseByDistinct, publicData] = await Promise.all([
     getCategories({ revalidate: 3600 }).catch(() => []),
     getBrowseByDistinct({ revalidate: 3600 }).catch(() => []),
     getMovies(
@@ -54,10 +68,15 @@ export default async function YearPage({ params }) {
         pageNumber: 1,
       },
       { revalidate: 300 }
-    ).catch(() => ({ movies: [], page: 1, pages: 1, totalMovies: 0 })),
+    ).catch(() => EMPTY_DATA),
   ]);
 
-  if (!Array.isArray(data?.movies) || data.movies.length === 0) {
+  const { data } = await resolveListingPageForRequest(publicData, {
+    year,
+    pageNumber: 1,
+  });
+
+  if (!hasListingPageContent(data, 1)) {
     notFound();
   }
 
