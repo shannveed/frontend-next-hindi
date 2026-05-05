@@ -1,14 +1,80 @@
 // frontend-next/src/lib/api.js
-const RAW_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL || 'https://api-hi.moviefrost.com';
+const DEFAULT_API_BASE = 'https://api-hi.moviefrost.com';
+const DEFAULT_SITE_URL = 'https://hi.moviefrost.com';
 
-// ✅ normalize: remove trailing slashes + accidental "/api"
-const API_BASE = RAW_BASE.replace(/\/+$/, '').replace(/\/api$/i, '');
+const stripTrailingSlash = (value = '') =>
+  String(value || '').replace(/\/+$/, '');
+
+const ensureUrl = (value, fallback) => {
+  let v = String(value || fallback || '').trim();
+
+  if (!v) return fallback;
+
+  if (!/^https?:\/\//i.test(v)) {
+    const isLocal =
+      v.startsWith('localhost') ||
+      v.startsWith('127.0.0.1') ||
+      v.startsWith('0.0.0.0');
+
+    v = `${isLocal ? 'http' : 'https'}://${v.replace(/^\/+/, '')}`;
+  }
+
+  return stripTrailingSlash(v).replace(/\/api$/i, '');
+};
+
+const isLocalOrigin = (origin = '') => {
+  try {
+    const host = new URL(origin).hostname;
+    return (
+      host === 'localhost' ||
+      host === '127.0.0.1' ||
+      host === '0.0.0.0'
+    );
+  } catch {
+    return false;
+  }
+};
+
+const sameOrigin = (a = '', b = '') => {
+  try {
+    const ua = new URL(a);
+    const ub = new URL(b);
+
+    return ua.protocol === ub.protocol && ua.host === ub.host;
+  } catch {
+    return false;
+  }
+};
+
+const getSafeApiBase = () => {
+  const siteUrl = ensureUrl(
+    process.env.NEXT_PUBLIC_SITE_URL,
+    DEFAULT_SITE_URL
+  );
+
+  let apiBase = ensureUrl(
+    process.env.NEXT_PUBLIC_API_BASE_URL,
+    DEFAULT_API_BASE
+  );
+
+  // Production safety: never let SSR fetch localhost on Vercel.
+  if (process.env.VERCEL && isLocalOrigin(apiBase)) {
+    apiBase = DEFAULT_API_BASE;
+  }
+
+  // Safety: avoid frontend -> frontend recursion.
+  if (sameOrigin(apiBase, siteUrl)) {
+    apiBase = DEFAULT_API_BASE;
+  }
+
+  return apiBase;
+};
+
+const API_BASE = getSafeApiBase();
 const API = `${API_BASE}/api`;
 
 /**
- * ✅ Cache tags used for On‑Demand Revalidation
- * Backend will call: POST https://www.moviefrost.com/revalidate
+ * Cache tags used for On-Demand Revalidation.
  */
 export const CACHE_TAGS = {
   MOVIES: 'movies',
@@ -105,13 +171,21 @@ async function fetchJson(url, init = {}, opts = {}) {
     nullOn400MovieNotFound = true,
   } = opts;
 
-  const res = await fetch(url, {
-    ...init,
-    headers: {
-      Accept: 'application/json',
-      ...(init.headers || {}),
-    },
-  });
+  let res;
+
+  try {
+    res = await fetch(url, {
+      ...init,
+      headers: {
+        Accept: 'application/json',
+        ...(init.headers || {}),
+      },
+    });
+  } catch (error) {
+    throw new Error(
+      `API fetch failed: ${error?.message || error || 'network_error'}`
+    );
+  }
 
   const text = await res.text().catch(() => '');
   let data = null;
@@ -127,9 +201,9 @@ async function fetchJson(url, init = {}, opts = {}) {
   if (nullOn403 && res.status === 403) return null;
 
   if (!res.ok) {
-    const msg = data?.message || (typeof data === 'string' ? data : res.statusText);
+    const msg =
+      data?.message || (typeof data === 'string' ? data : res.statusText);
 
-    // ✅ backend sometimes returns 400 with "Movie not found"
     if (
       nullOn400MovieNotFound &&
       res.status === 400 &&
@@ -169,9 +243,6 @@ export async function getMovieBySlug(slug, { revalidate = 3600 } = {}) {
   );
 }
 
-/* ============================================================
-   ✅ Admin movie fetch (SSR can preview drafts)
-   ============================================================ */
 export async function getMovieBySlugAdmin(slug, token) {
   const raw = String(slug || '').trim();
   const safe = encodeURIComponent(raw);
@@ -192,9 +263,6 @@ export async function getMovieBySlugAdmin(slug, token) {
   );
 }
 
-/* ============================================================
-   ✅ Admin listing fetch (SSR paginated pages can preview drafts)
-   ============================================================ */
 export async function getMoviesAdminServer(query = {}, token) {
   const authToken = String(token || '').trim();
   if (!authToken) return null;
@@ -228,7 +296,10 @@ export async function getLatestMovies({ revalidate = 300 } = {}) {
   );
 }
 
-export async function getLatestNewMovies(limit = 100, { revalidate = 300 } = {}) {
+export async function getLatestNewMovies(
+  limit = 100,
+  { revalidate = 300 } = {}
+) {
   return fetchJson(
     `${API}/movies/latest-new?limit=${encodeURIComponent(limit)}`,
     nextCache(revalidate, [CACHE_TAGS.MOVIES, CACHE_TAGS.HOME])
@@ -249,18 +320,23 @@ export async function getTopRatedMovies({ revalidate = 600 } = {}) {
   );
 }
 
-export async function getRelatedMovies(idOrSlug, limit = 20, { revalidate = 600 } = {}) {
+export async function getRelatedMovies(
+  idOrSlug,
+  limit = 20,
+  { revalidate = 600 } = {}
+) {
   const raw = String(idOrSlug || '').trim();
   const safe = encodeURIComponent(raw);
   if (!safe) return [];
+
   const data = await fetchJson(
     `${API}/movies/related/${safe}?limit=${encodeURIComponent(limit)}`,
     nextCache(revalidate, [CACHE_TAGS.MOVIES, relatedTag(raw)])
   );
+
   return Array.isArray(data) ? data : [];
 }
 
-/* ✅ Optional: admin related for draft previews */
 export async function getRelatedMoviesAdmin(idOrSlug, token, limit = 20) {
   const raw = String(idOrSlug || '').trim();
   const safe = encodeURIComponent(raw);
@@ -318,10 +394,7 @@ export async function getTrendingBlogPosts(
   limit = 6,
   { revalidate = 300 } = {}
 ) {
-  return getBlogPosts(
-    { trending: true, limit, pageNumber: 1 },
-    { revalidate }
-  );
+  return getBlogPosts({ trending: true, limit, pageNumber: 1 }, { revalidate });
 }
 
 export async function getBlogTopViewedThisMonth(
@@ -336,11 +409,7 @@ export async function getBlogTopViewedThisMonth(
   return Array.isArray(data?.posts) ? data.posts : [];
 }
 
-export async function getBlogPost(
-  categorySlug,
-  slug,
-  { revalidate = 300 } = {}
-) {
+export async function getBlogPost(categorySlug, slug, { revalidate = 300 } = {}) {
   const category = String(categorySlug || '').trim();
   const postSlug = String(slug || '').trim();
 

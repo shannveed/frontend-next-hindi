@@ -36,26 +36,160 @@ import EffectiveGateNativeBanner, {
 
 import MovieFaqSection from '../../../components/movie/MovieFaqSection';
 
-export const dynamic = 'auto';
+/**
+ * Force dynamic prevents a bad ISR/static render from becoming a permanent 500
+ * on movie pages. The page is still fully SEO-rendered on the server.
+ */
+export const dynamic = 'force-dynamic';
 export const dynamicParams = true;
-export const revalidate = 3600;
+export const revalidate = 0;
 
 const RELATED_MOVIES_LIMIT = 10;
 
-const getPublicMovie = cache((slug) => getMovieBySlug(slug, { revalidate }));
+const safeText = (value = '') => String(value ?? '').trim();
+
+const getAdminPreviewToken = async () => {
+  try {
+    const storeMaybe = cookies();
+    const store =
+      typeof storeMaybe?.then === 'function' ? await storeMaybe : storeMaybe;
+
+    return store?.get?.('mf_token')?.value || null;
+  } catch {
+    return null;
+  }
+};
+
+const getPublicMovie = cache(async (slug) => {
+  const raw = safeText(slug);
+  if (!raw) return null;
+
+  try {
+    return await getMovieBySlug(raw, { revalidate: 0 });
+  } catch (error) {
+    console.error(
+      `[movie-page] public movie fetch failed for "${raw}":`,
+      error?.message || error
+    );
+    return null;
+  }
+});
 
 async function getMovieForRequest(slug) {
-  const pub = await getPublicMovie(slug);
-  if (pub) return { movie: pub, source: 'public', token: null };
+  const raw = safeText(slug);
+  if (!raw) return { movie: null, source: 'none', token: null };
 
-  const token = cookies().get('mf_token')?.value || null;
+  const publicMovie = await getPublicMovie(raw);
+  if (publicMovie) {
+    return { movie: publicMovie, source: 'public', token: null };
+  }
+
+  const token = await getAdminPreviewToken();
   if (!token) return { movie: null, source: 'none', token: null };
 
-  const adminMovie = await getMovieBySlugAdmin(slug, token);
-  if (adminMovie) return { movie: adminMovie, source: 'admin', token };
+  try {
+    const adminMovie = await getMovieBySlugAdmin(raw, token);
+    if (adminMovie) {
+      return { movie: adminMovie, source: 'admin', token };
+    }
+  } catch (error) {
+    console.error(
+      `[movie-page] admin movie fallback failed for "${raw}":`,
+      error?.message || error
+    );
+  }
 
   return { movie: null, source: 'none', token: null };
 }
+
+const safeBuildGraphJsonLd = (movie) => {
+  try {
+    return buildMovieGraphJsonLd(movie);
+  } catch (error) {
+    console.error(
+      '[movie-page] JSON-LD build failed:',
+      error?.message || error
+    );
+    return null;
+  }
+};
+
+const safeBuildMetadata = (movie, source, fallbackSlug) => {
+  try {
+    const seg = safeText(movie?.slug) || safeText(movie?._id) || fallbackSlug;
+    const publicPath = `/movie/${seg}`;
+
+    const canonical = movieCanonical(movie);
+    const title = buildMovieTitle(movie, { maxLen: 100 });
+    const description = buildMovieDescription(movie);
+
+    const isDraftAdminPreview =
+      source === 'admin' && movie?.isPublished === false;
+
+    return {
+      title: { absolute: title },
+      description,
+
+      alternates: buildHreflangAlternatesForPath(publicPath, {
+        canonical,
+      }),
+
+      robots: isDraftAdminPreview
+        ? {
+          index: false,
+          follow: false,
+          googleBot: { index: false, follow: false },
+        }
+        : { index: true, follow: true },
+
+      openGraph: {
+        type: movie?.type === 'WebSeries' ? 'video.tv_show' : 'video.movie',
+        url: canonical,
+        title,
+        description,
+        images: [movie?.titleImage || movie?.image].filter(Boolean),
+      },
+
+      twitter: {
+        card: 'summary_large_image',
+        title,
+        description,
+        images: [movie?.titleImage || movie?.image].filter(Boolean),
+      },
+    };
+  } catch (error) {
+    console.error(
+      '[movie-page] metadata build failed:',
+      error?.message || error
+    );
+
+    return {
+      title: 'MovieFrost',
+      robots: { index: false, follow: true },
+    };
+  }
+};
+
+const getRelatedForMovie = async ({ movie, source, token }) => {
+  const seg = safeText(movie?.slug) || safeText(movie?._id);
+  if (!seg) return [];
+
+  try {
+    if (source === 'admin' && token) {
+      return await getRelatedMoviesAdmin(seg, token, RELATED_MOVIES_LIMIT);
+    }
+
+    return await getRelatedMovies(seg, RELATED_MOVIES_LIMIT, {
+      revalidate: 0,
+    });
+  } catch (error) {
+    console.warn(
+      `[movie-page] related movies failed for "${seg}":`,
+      error?.message || error
+    );
+    return [];
+  }
+};
 
 export async function generateStaticParams() {
   try {
@@ -78,95 +212,69 @@ export async function generateStaticParams() {
     const set = new Set();
 
     for (const m of all) {
-      const seg = m?.slug || m?._id;
-      if (seg) set.add(String(seg));
+      const seg = safeText(m?.slug) || safeText(m?._id);
+      if (seg) set.add(seg);
     }
 
     return Array.from(set)
       .slice(0, 200)
       .map((slug) => ({ slug }));
-  } catch {
+  } catch (error) {
+    console.warn(
+      '[movie-page] generateStaticParams skipped:',
+      error?.message || error
+    );
     return [];
   }
 }
 
 export async function generateMetadata({ params }) {
-  const slug = params?.slug;
-  const { movie, source } = await getMovieForRequest(slug);
+  try {
+    const slug = safeText(params?.slug);
+    const { movie, source } = await getMovieForRequest(slug);
 
-  if (!movie) {
+    if (!movie) {
+      return {
+        title: 'Movie not found',
+        robots: { index: false, follow: false },
+      };
+    }
+
+    return safeBuildMetadata(movie, source, slug);
+  } catch (error) {
+    console.error(
+      '[movie-page] generateMetadata failed:',
+      error?.message || error
+    );
+
     return {
-      title: 'Movie not found',
-      robots: { index: false, follow: false },
+      title: 'MovieFrost',
+      robots: { index: false, follow: true },
     };
   }
-
-  const seg = movie?.slug || movie?._id || slug;
-  const publicPath = `/movie/${seg}`;
-
-  const canonical = movieCanonical(movie);
-  const title = buildMovieTitle(movie, { maxLen: 100 });
-  const description = buildMovieDescription(movie);
-
-  const isDraftAdminPreview =
-    source === 'admin' && movie?.isPublished === false;
-
-  return {
-    title: { absolute: title },
-    description,
-
-    alternates: buildHreflangAlternatesForPath(publicPath, {
-      canonical,
-    }),
-
-    robots: isDraftAdminPreview
-      ? {
-        index: false,
-        follow: false,
-        googleBot: { index: false, follow: false },
-      }
-      : { index: true, follow: true },
-
-    openGraph: {
-      type: movie?.type === 'WebSeries' ? 'video.tv_show' : 'video.movie',
-      url: canonical,
-      title,
-      description,
-      images: [movie?.titleImage || movie?.image].filter(Boolean),
-    },
-
-    twitter: {
-      card: 'summary_large_image',
-      title,
-      description,
-      images: [movie?.titleImage || movie?.image].filter(Boolean),
-    },
-  };
 }
 
 export default async function MoviePage({ params }) {
-  const slug = params?.slug;
+  const slug = safeText(params?.slug);
 
   const { movie, source, token } = await getMovieForRequest(slug);
   if (!movie) notFound();
 
-  if (movie?.slug && slug !== movie.slug) {
-    permanentRedirect(`/movie/${movie.slug}`);
+  const savedSlug = safeText(movie?.slug);
+
+  if (savedSlug && slug && slug !== savedSlug) {
+    permanentRedirect(`/movie/${savedSlug}`);
   }
 
-  const seg = movie.slug || movie._id;
-  const isDraftAdminPreview = source === 'admin' && movie?.isPublished === false;
+  const seg = savedSlug || safeText(movie?._id) || slug;
 
-  const related =
-    source === 'admin' && token
-      ? await getRelatedMoviesAdmin(seg, token, RELATED_MOVIES_LIMIT).catch(
-        () => []
-      )
-      : await getRelatedMovies(seg, RELATED_MOVIES_LIMIT, {
-        revalidate: 3600,
-      }).catch(() => []);
+  const isDraftAdminPreview =
+    source === 'admin' && movie?.isPublished === false;
 
-  const graphLd = buildMovieGraphJsonLd(movie);
+  const related = await getRelatedForMovie({ movie, source, token });
+
+  const graphLd = !isDraftAdminPreview ? safeBuildGraphJsonLd(movie) : null;
+
   const ADS_ENABLED = process.env.NEXT_PUBLIC_ADS_ENABLED === 'true';
 
   const breadcrumbItems = [
@@ -177,7 +285,7 @@ export default async function MoviePage({ params }) {
 
   return (
     <>
-      {!isDraftAdminPreview ? <JsonLd data={graphLd} /> : null}
+      {graphLd ? <JsonLd data={graphLd} /> : null}
 
       <div className="container mx-auto min-h-screen px-2 mobile:px-0 my-6 pb-24 sm:pb-8">
         <VisibleBreadcrumbs items={breadcrumbItems} className="mb-4" />
@@ -188,7 +296,8 @@ export default async function MoviePage({ params }) {
               Admin Draft Preview
             </p>
             <p className="text-sm text-dryGray mt-2">
-              This movie is currently saved as a draft and is visible only to logged-in admins.
+              This movie is currently saved as a draft and is visible only to
+              logged-in admins.
             </p>
           </div>
         ) : null}
@@ -215,7 +324,7 @@ export default async function MoviePage({ params }) {
 
         <RelatedMoviesServer
           currentId={movie._id}
-          movies={related}
+          movies={Array.isArray(related) ? related : []}
           limit={RELATED_MOVIES_LIMIT}
         />
 

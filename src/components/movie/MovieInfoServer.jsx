@@ -7,29 +7,44 @@ import {
   FaShareAlt,
   FaCloudDownloadAlt,
 } from 'react-icons/fa';
-import { SiImdb, SiRottentomatoes } from 'react-icons/si';
 
 import MovieAverageStars from './MovieAverageStars';
 import MovieShareButtonClient from './MovieShareButtonClient';
 import MovieTrailerSection from './MovieTrailerSection';
 import SafeImage from '../common/SafeImage';
 
+const clean = (value = '') => String(value ?? '').trim();
+
 const formatTime = (minutes) => {
   const n = Number(minutes);
   if (!Number.isFinite(n) || n <= 0) return '';
+
   const hrs = Math.floor(n / 60);
   const mins = Math.round(n % 60);
+
   const parts = [];
   if (hrs > 0) parts.push(`${hrs}Hr`);
   if (mins > 0) parts.push(`${mins}Min`);
+
   return parts.join(' ');
 };
 
-const toNumberOrNull = (v) => {
-  if (v === null || v === undefined || v === '') return null;
-  const n = Number(v);
+const toNumberOrNull = (value) => {
+  if (value === null || value === undefined || value === '') return null;
+
+  const n = Number(value);
   return Number.isFinite(n) ? n : null;
 };
+
+function RatingTextLogo({ children, className = '' }) {
+  return (
+    <span
+      className={`inline-flex items-center justify-center min-w-7 h-5 rounded text-[11px] font-black tracking-tight ${className}`}
+    >
+      {children}
+    </span>
+  );
+}
 
 function ExternalRatings({ movie }) {
   const imdb = movie?.externalRatings?.imdb || {};
@@ -39,22 +54,23 @@ function ExternalRatings({ movie }) {
   const imdbVotes = toNumberOrNull(imdb.votes);
 
   const imdbUrl =
-    String(imdb.url || '').trim() ||
-    (movie?.imdbId ? `https://www.imdb.com/title/${movie.imdbId}/` : '') ||
+    clean(imdb.url) ||
+    (movie?.imdbId ? `https://www.imdb.com/title/${clean(movie.imdbId)}/` : '') ||
     (movie?.name
       ? `https://www.imdb.com/find?q=${encodeURIComponent(movie.name)}`
       : '');
 
   const rtRating = toNumberOrNull(rt.rating);
+
   const rtUrl =
-    String(rt.url || '').trim() ||
+    clean(rt.url) ||
     (movie?.name
       ? `https://www.rottentomatoes.com/search?search=${encodeURIComponent(
         movie.name
       )}`
       : '');
 
-  const badge =
+  const badgeClass =
     'inline-flex items-center gap-2 px-3 py-2 rounded bg-main border border-border text-sm text-white hover:border-customPurple transitions';
 
   if (!imdbUrl && !rtUrl) return null;
@@ -66,10 +82,13 @@ function ExternalRatings({ movie }) {
           href={imdbUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className={badge}
+          className={badgeClass}
+          title={imdbRating !== null ? 'IMDb rating' : 'Open IMDb'}
         >
-          <SiImdb className="text-[#f5c518]" />
-          <span className="font-semibold">IMDb</span>
+          <RatingTextLogo className="bg-[#f5c518] text-black">
+            IMDb
+          </RatingTextLogo>
+
           <span className="text-dryGray">
             {imdbRating !== null ? `${imdbRating.toFixed(1)}/10` : 'View'}
             {imdbRating !== null && imdbVotes !== null
@@ -84,10 +103,13 @@ function ExternalRatings({ movie }) {
           href={rtUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className={badge}
+          className={badgeClass}
+          title={rtRating !== null ? 'Rotten Tomatoes score' : 'Search Rotten Tomatoes'}
         >
-          <SiRottentomatoes className="text-[#fa320a]" />
-          <span className="font-semibold">Rotten</span>
+          <RatingTextLogo className="bg-[#fa320a] text-white">
+            RT
+          </RatingTextLogo>
+
           <span className="text-dryGray">
             {rtRating !== null ? `${rtRating}%` : 'Search'}
           </span>
@@ -99,7 +121,13 @@ function ExternalRatings({ movie }) {
 
 function CastScroller({ casts = [] }) {
   const list = Array.isArray(casts)
-    ? casts.filter((c) => c?.name).slice(0, 20)
+    ? casts
+      .map((cast) => ({
+        name: clean(cast?.name),
+        image: clean(cast?.image),
+      }))
+      .filter((cast) => cast.name)
+      .slice(0, 20)
     : [];
 
   if (!list.length) return null;
@@ -112,23 +140,24 @@ function CastScroller({ casts = [] }) {
       </div>
 
       <div className="flex gap-3 overflow-x-auto pb-2">
-        {list.map((c, idx) => (
+        {list.map((cast, idx) => (
           <div
-            key={`${c?.name || 'cast'}-${idx}`}
+            key={`${cast.name}-${idx}`}
             className="min-w-[120px] max-w-[160px] bg-main border border-border rounded-lg p-2"
           >
             <div className="w-full aspect-[3/4] relative rounded-md overflow-hidden bg-black/40 border border-border">
               <SafeImage
-                src={c?.image}
+                src={cast.image}
                 fallbackCandidates={['/images/placeholder.jpg']}
-                alt={c?.name || 'Actor'}
+                alt={cast.name || 'Actor'}
                 fill
                 sizes="140px"
                 className="object-contain"
               />
             </div>
+
             <p className="mt-1 text-[11px] font-medium text-white/90 text-center line-clamp-2 leading-tight">
-              {c?.name}
+              {cast.name}
             </p>
           </div>
         ))}
@@ -138,29 +167,37 @@ function CastScroller({ casts = [] }) {
 }
 
 export default function MovieInfoServer({ movie }) {
-  const seg = movie?.slug || movie?._id;
+  if (!movie) return null;
 
-  const categoryHref = movie?.category
-    ? `/movies?category=${encodeURIComponent(movie.category)}`
+  const seg = clean(movie?.slug) || clean(movie?._id);
+
+  const category = clean(movie?.category);
+  const language = clean(movie?.language);
+  const browseBy = clean(movie?.browseBy);
+  const directorName = clean(movie?.director);
+  const descriptionText = clean(movie?.desc);
+
+  const categoryHref = category
+    ? `/movies?category=${encodeURIComponent(category)}`
     : '/movies';
 
-  const languageHref = movie?.language
-    ? `/movies?language=${encodeURIComponent(movie.language)}`
+  const languageHref = language
+    ? `/movies?language=${encodeURIComponent(language)}`
     : '/movies';
 
-  const browseByHref = movie?.browseBy
-    ? `/movies?browseBy=${encodeURIComponent(movie.browseBy)}`
+  const browseByHref = browseBy
+    ? `/movies?browseBy=${encodeURIComponent(browseBy)}`
     : '/movies';
 
-  const directorName = String(movie?.director || '').trim();
-  const descriptionText = String(movie?.desc || '').trim();
+  const yearHref = movie?.year
+    ? `/movies?year=${encodeURIComponent(String(movie.year))}`
+    : '/movies';
 
   return (
     <div className="w-full text-white">
-      {/* MOBILE: info + description */}
+      {/* MOBILE */}
       <section className="sm:hidden px-4 mt-4">
         <div className="relative w-full h-[60vh] rounded-xl overflow-hidden border border-border bg-main">
-          {/* ✅ Mobile LCP image */}
           <SafeImage
             src={movie?.titleImage}
             fallbackCandidates={[movie?.image, '/images/MOVIEFROST.png']}
@@ -185,39 +222,30 @@ export default function MovieInfoServer({ movie }) {
             ) : null}
 
             {movie?.year ? (
-              <Link
-                href={`/movies?year=${encodeURIComponent(movie.year)}`}
-                className="hover:text-customPurple transitions"
-              >
+              <Link href={yearHref} className="hover:text-customPurple transitions">
                 {movie.year}
               </Link>
             ) : null}
 
-            {movie?.category ? (
+            {category ? (
               <Link
                 href={categoryHref}
                 className="inline-flex items-center gap-1 hover:text-customPurple transitions"
               >
                 <FaFolder className="text-subMain w-3 h-3" />
-                {movie.category}
+                {category}
               </Link>
             ) : null}
 
-            {movie?.language ? (
-              <Link
-                href={languageHref}
-                className="hover:text-customPurple transitions"
-              >
-                {movie.language}
+            {language ? (
+              <Link href={languageHref} className="hover:text-customPurple transitions">
+                {language}
               </Link>
             ) : null}
 
-            {movie?.browseBy ? (
-              <Link
-                href={browseByHref}
-                className="hover:text-customPurple transitions"
-              >
-                {movie.browseBy}
+            {browseBy ? (
+              <Link href={browseByHref} className="hover:text-customPurple transitions">
+                {browseBy}
               </Link>
             ) : null}
           </div>
@@ -259,7 +287,6 @@ export default function MovieInfoServer({ movie }) {
       {/* DESKTOP / TABLET */}
       <section className="hidden sm:block">
         <div className="relative w-full min-h-[720px] lg:min-h-[calc(100vh-120px)] overflow-hidden rounded border border-border bg-black">
-          {/* ✅ Desktop / tablet LCP image */}
           <SafeImage
             src={movie?.image}
             fallbackCandidates={[movie?.titleImage, '/images/MOVIEFROST.png']}
@@ -270,13 +297,13 @@ export default function MovieInfoServer({ movie }) {
             sizes="(max-width: 639px) 0px, 100vw"
             className="object-cover"
           />
+
           <div className="absolute inset-0 bg-main/95" />
 
           <div className="relative container mx-auto px-8 py-10 lg:py-14">
             <div className="grid grid-cols-3 gap-8 items-start">
               <div className="col-span-1">
                 <div className="w-full rounded-md overflow-hidden border border-border bg-dry">
-                  {/* ✅ Visible but not the primary LCP on desktop */}
                   <SafeImage
                     src={movie?.titleImage}
                     fallbackCandidates={[movie?.image, '/images/MOVIEFROST.png']}
@@ -304,39 +331,30 @@ export default function MovieInfoServer({ movie }) {
                   ) : null}
 
                   {movie?.year ? (
-                    <Link
-                      href={`/movies?year=${encodeURIComponent(movie.year)}`}
-                      className="hover:text-customPurple transitions"
-                    >
+                    <Link href={yearHref} className="hover:text-customPurple transitions">
                       {movie.year}
                     </Link>
                   ) : null}
 
-                  {movie?.category ? (
+                  {category ? (
                     <Link
                       href={categoryHref}
                       className="inline-flex items-center gap-1 hover:text-customPurple transitions"
                     >
                       <FaFolder className="text-subMain w-3 h-3" />
-                      {movie.category}
+                      {category}
                     </Link>
                   ) : null}
 
-                  {movie?.language ? (
-                    <Link
-                      href={languageHref}
-                      className="hover:text-customPurple transitions"
-                    >
-                      {movie.language}
+                  {language ? (
+                    <Link href={languageHref} className="hover:text-customPurple transitions">
+                      {language}
                     </Link>
                   ) : null}
 
-                  {movie?.browseBy ? (
-                    <Link
-                      href={browseByHref}
-                      className="hover:text-customPurple transitions"
-                    >
-                      {movie.browseBy}
+                  {browseBy ? (
+                    <Link href={browseByHref} className="hover:text-customPurple transitions">
+                      {browseBy}
                     </Link>
                   ) : null}
 
@@ -380,12 +398,16 @@ export default function MovieInfoServer({ movie }) {
                   <div className="flex items-center justify-between gap-3 flex-wrap">
                     <p className="text-white font-semibold text-sm">Rating</p>
                     <p className="text-xs text-dryGray">
-                      {Number(movie?.numberOfReviews || 0).toLocaleString()} reviews
+                      {Number(movie?.numberOfReviews || 0).toLocaleString()}{' '}
+                      reviews
                     </p>
                   </div>
 
                   <div className="mt-2 flex items-center gap-2">
-                    <MovieAverageStars movieIdOrSlug={seg} fallback={movie?.rate || 0} />
+                    <MovieAverageStars
+                      movieIdOrSlug={seg}
+                      fallback={movie?.rate || 0}
+                    />
                     <span className="text-sm text-dryGray">
                       {Number(movie?.rate || 0).toFixed(1)}/5
                     </span>
@@ -410,10 +432,9 @@ export default function MovieInfoServer({ movie }) {
         </div>
       </section>
 
-      {/* Trailer BELOW description and ABOVE ads banner */}
       <MovieTrailerSection movie={movie} />
 
-      {/* MOBILE rating + cast moved below trailer */}
+      {/* MOBILE rating + cast below trailer */}
       <section className="sm:hidden px-4">
         <div className="mt-4 bg-dry border border-border rounded-xl p-4">
           <div className="flex items-center justify-between gap-3 flex-wrap">
