@@ -22,7 +22,7 @@ module.exports = {
         mobile: { max: '639px' },
       },
       colors: {
-        customPurple: '#1B82FF',
+        customPurple: '#538F14',
         main: '#080A1A',
         subMain: '#F20000',
         dry: '#0B0F29',

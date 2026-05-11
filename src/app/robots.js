@@ -24,17 +24,26 @@ export default function robots() {
           '/favorites',
           '/api',
 
-          // ✅ Crawl-budget cleanup
+          // Crawl-budget cleanup
           '/actor',
           '/watch',
           '/search',
           '/login',
           '/signup',
           '/register',
+
+          // Blog/admin tools
+          '/blog-posts',
+          '/blog-preview',
+          '/get-blog-posts',
+          '/update-blog-posts',
+          '/bulk-create-blog-posts',
         ],
       },
     ],
 
     sitemap: [`${SITE_URL}/sitemap-index.xml`, `${SITE_URL}/sitemap.xml`],
+
+    host: SITE_URL,
   };
 }

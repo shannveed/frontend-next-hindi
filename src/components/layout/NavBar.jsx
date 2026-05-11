@@ -600,7 +600,7 @@ export default function NavBar() {
             <Image
               src="/images/MOVIEFROST.png"
               alt="MovieFrost"
-              width={180}
+              width={140}
               height={40}
               priority
               sizes="180px"

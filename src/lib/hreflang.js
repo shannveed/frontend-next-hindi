@@ -40,18 +40,23 @@ export const HINDI_SITE_URL = normalizeOrigin(
   'https://hi.moviefrost.com'
 );
 
-// You asked for en-IN.
-// If the Hindi site later becomes fully Hindi-language content, change this to hi-IN.
+/**
+ * For Hindi/India subdomain.
+ *
+ * Use:
+ * - hi-IN if UI/content is Hindi or Hindi-targeted.
+ * - en-IN if content is mainly English but targeted to India.
+ */
 export const INDIA_HREFLANG =
-  clean(process.env.NEXT_PUBLIC_HINDI_HREFLANG) || 'en-IN';
+  clean(process.env.NEXT_PUBLIC_HINDI_HREFLANG) || 'hi-IN';
 
 /**
  * Returns Next.js metadata alternates:
  *
- * <link rel="canonical" href="current-site-url/path" />
- * <link rel="alternate" hreflang="en" href="https://www.moviefrost.com/path" />
- * <link rel="alternate" hreflang="en-IN" href="https://hi.moviefrost.com/path" />
- * <link rel="alternate" hreflang="x-default" href="https://www.moviefrost.com/path" />
+ * canonical: current Hindi site URL
+ * en: main English site
+ * hi-IN/en-IN: Hindi/India subdomain
+ * x-default: main English site
  */
 export const buildHreflangAlternatesForPath = (
   path = '/',

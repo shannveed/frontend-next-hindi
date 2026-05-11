@@ -6,7 +6,8 @@ import {
   getLatestNewMovies,
   getTopRatedMovies,
 } from '../lib/api';
-import { SITE_URL } from '../lib/seo';
+
+import { buildHreflangAlternatesForPath } from '../lib/hreflang';
 
 import HomeBannerSectionPublic from '../components/home/HomeBannerSectionPublic';
 import HomeTrendingSectionPublic from '../components/home/HomeTrendingSectionPublic';
@@ -16,7 +17,7 @@ import HomeBrowseContentPublic from '../components/home/HomeBrowseContentPublic'
 export const revalidate = 60;
 
 export const metadata = {
-  alternates: { canonical: `${SITE_URL}/` },
+  alternates: buildHreflangAlternatesForPath('/'),
 };
 
 export default async function HomePage() {
