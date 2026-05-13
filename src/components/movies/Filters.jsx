@@ -67,62 +67,97 @@ const normalizeTypeForBrowse = (typeValue = '') => {
 function Dropdown({ selected, items, onSelect }) {
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef(null);
+  const closeTimerRef = useRef(null);
+
+  const clearCloseTimer = useCallback(() => {
+    if (closeTimerRef.current) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  }, []);
+
+  const openNow = useCallback(() => {
+    clearCloseTimer();
+    setOpen(true);
+  }, [clearCloseTimer]);
+
+  const closeSoon = useCallback(() => {
+    clearCloseTimer();
+
+    closeTimerRef.current = window.setTimeout(() => {
+      setOpen(false);
+      closeTimerRef.current = null;
+    }, 160);
+  }, [clearCloseTimer]);
 
   useEffect(() => {
     const handler = (e) => {
       if (wrapperRef.current && !wrapperRef.current.contains(e.target)) {
+        clearCloseTimer();
         setOpen(false);
       }
     };
+
     document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
+
+    return () => {
+      document.removeEventListener('mousedown', handler);
+      clearCloseTimer();
+    };
+  }, [clearCloseTimer]);
 
   return (
     <div
       ref={wrapperRef}
       className="relative w-full"
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
+      onMouseEnter={openNow}
+      onMouseLeave={closeSoon}
+      onFocus={openNow}
     >
       <button
         type="button"
-        onClick={() => setOpen((p) => !p)}
+        onClick={() => {
+          clearCloseTimer();
+          setOpen((p) => !p);
+        }}
         aria-expanded={open}
-        className="w-full flex items-center justify-between gap-2 bg-dry border border-border rounded px-4 py-3 above-1000:py-2.5 mobile:py-2 text-white text-xs above-1000:text-xs"
+        className="w-full flex items-center justify-between gap-2 bg-dry border border-border rounded px-4 py-3 above-1000:py-2.5 mobile:py-2 text-white text-xs above-1000:text-xs hover:border-customPurple transitions"
       >
         <span className="truncate">{selected?.title || ''}</span>
         <FaAngleDown className={`transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
 
       {open && (
-        <div className="absolute top-full left-0 mt-2 w-full bg-dry border border-border rounded shadow-lg overflow-hidden z-50 max-h-72 overflow-y-auto">
-          {items.map((item, i) => {
-            const active = item?.title === selected?.title;
+        <div className="absolute top-full left-0 w-full pt-1 z-[80]">
+          <div className="w-full bg-dry border border-border rounded shadow-lg overflow-hidden max-h-72 overflow-y-auto">
+            {items.map((item, i) => {
+              const active = item?.title === selected?.title;
 
-            return (
-              <button
-                type="button"
-                key={`${item?.title || 'item'}-${i}`}
-                onClick={() => {
-                  onSelect(item);
-                  setOpen(false);
-                }}
-                className={`w-full text-left text-xs py-2 above-1000:py-1.5 mobile:py-1.5 pl-10 above-1000:pl-8 mobile:pl-6 pr-4 above-1000:pr-3 mobile:pr-2 relative transition
-                  ${active
-                    ? 'font-semibold bg-customPurple text-white'
-                    : 'font-normal hover:bg-main/70 text-white'
-                  }`}
-              >
-                {item?.title}
-                {active && (
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2">
-                    <FaCheck className="text-white" />
-                  </span>
-                )}
-              </button>
-            );
-          })}
+              return (
+                <button
+                  type="button"
+                  key={`${item?.title || 'item'}-${i}`}
+                  onClick={() => {
+                    clearCloseTimer();
+                    onSelect(item);
+                    setOpen(false);
+                  }}
+                  className={`w-full text-left text-xs py-2 above-1000:py-1.5 mobile:py-1.5 pl-10 above-1000:pl-8 mobile:pl-6 pr-4 above-1000:pr-3 mobile:pr-2 relative transition
+                    ${active
+                      ? 'font-semibold bg-customPurple text-white'
+                      : 'font-normal hover:bg-main/70 text-white'
+                    }`}
+                >
+                  {item?.title}
+                  {active && (
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2">
+                      <FaCheck className="text-white" />
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
@@ -140,7 +175,6 @@ export default function MoviesFilters({ categories = [], browseByDistinct = [], 
     return [{ title: 'All Categories' }, ...cats.map((c) => ({ title: c.title }))];
   }, [categories]);
 
-  // ✅ BrowseBy list changes by type
   const browseItems = useMemo(() => {
     if (typeKey === 'WebSeries') return browseByWebSeriesData;
     if (typeKey === 'Movie') return browseByMovieData;
@@ -199,7 +233,6 @@ export default function MoviesFilters({ categories = [], browseByDistinct = [], 
       params.set(k, val);
     };
 
-    // Keep existing query
     set('type', query?.type);
     set('category', query?.category);
     set('browseBy', query?.browseBy);
@@ -219,7 +252,6 @@ export default function MoviesFilters({ categories = [], browseByDistinct = [], 
     (mutate) => {
       const params = buildBaseParams();
 
-      // reset pagination on filter change
       params.delete('pageNumber');
 
       mutate(params);
@@ -252,7 +284,6 @@ export default function MoviesFilters({ categories = [], browseByDistinct = [], 
     [query, router, pushParams]
   );
 
-  // Handlers
   const selectBrowseBy = (item) => {
     setBrowseBy(item);
 

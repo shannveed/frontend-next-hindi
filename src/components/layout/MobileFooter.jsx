@@ -31,11 +31,20 @@ const loadPushApi = () => import('../../lib/client/pushNotifications');
 
 function MobileFooterInner() {
   const router = useRouter();
-  const pathname = usePathname();
+  const pathname = usePathname() || '/';
   const searchParams = useSearchParams();
 
-  const typeParam = (searchParams?.get('type') || '').toLowerCase();
-  const isTvShowsType = typeParam === 'webseries';
+  const typeParam = String(searchParams?.get('type') || '')
+    .toLowerCase()
+    .replace(/[-\s]+/g, '');
+
+  const isWebSeriesTypePage = pathname.startsWith('/movies/type/web-series');
+
+  const isTvShowsType =
+    isWebSeriesTypePage ||
+    typeParam === 'webseries' ||
+    typeParam === 'tvshows' ||
+    typeParam === 'series';
 
   const {
     mobileDrawer,
@@ -264,8 +273,10 @@ function MobileFooterInner() {
 
   const isHomeActive = isHomePage && activeMobileTab !== 'browseBy';
   const isBrowseByActive = isHomePage && activeMobileTab === 'browseBy';
-  const isMoviesActive = isMoviesPage && !isTvShowsType;
+
   const isTvShowsActive = isMoviesPage && isTvShowsType;
+  const isMoviesActive = isMoviesPage && !isTvShowsActive;
+
   const isBlogActive = isBlogPage;
 
   const handleHomeClick = (e) => {

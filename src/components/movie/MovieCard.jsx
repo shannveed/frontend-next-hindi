@@ -31,8 +31,6 @@ const isAdminControlTarget = (target) => {
 const isPrimaryPointer = (event) => {
   if (!event) return false;
 
-  // Mouse: button 0 = left click.
-  // Touch/Pen pointer events usually also report button 0.
   if (typeof event.button === 'number') return event.button === 0;
 
   return true;
@@ -41,11 +39,9 @@ const isPrimaryPointer = (event) => {
 function MovieCard({
   movie,
 
-  // ✅ show like by default (React parity)
   showLike = true,
   className = '',
 
-  // ✅ Admin controls (React parity)
   showAdminControls = false,
   isSelected = false,
   onSelectToggle,
@@ -55,13 +51,11 @@ function MovieCard({
   onMoveToLatestNewClick,
   onMoveToBannerClick,
 
-  // ✅ Fast pointer-based admin reorder
   adminDraggable = false,
   onAdminDragStart,
   onAdminDragEnter,
   onAdminDragEnd,
 
-  // ✅ Windows-style paint select / ctrl deselect
   onAdminSelectPointerDown,
   onAdminSelectPointerEnter,
 }) {
@@ -70,14 +64,12 @@ function MovieCard({
   const [liking, setLiking] = useState(false);
   const [liked, setLiked] = useState(false);
 
-  // dropdown state
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef(null);
 
   const seg = movie?.slug || movie?._id;
   const href = seg ? `/movie/${seg}` : '/movies';
 
-  // Prefetch guard (optional)
   const didPrefetchRef = useRef(false);
   const prefetchThis = useCallback(() => {
     if (!href) return;
@@ -97,7 +89,6 @@ function MovieCard({
     typeof onMoveToLatestNewClick === 'function' ||
     pagesList.length > 0;
 
-  // close dropdown on outside click
   useEffect(() => {
     if (!dropdownOpen) return;
 
@@ -110,7 +101,6 @@ function MovieCard({
     return () => document.removeEventListener('mousedown', onDown);
   }, [dropdownOpen]);
 
-  // ✅ sync liked state from cache
   useEffect(() => {
     if (!movie?._id) return;
 
@@ -201,7 +191,6 @@ function MovieCard({
     if (!isPrimaryPointer(e)) return;
     if (isAdminControlTarget(e.target)) return;
 
-    // In admin mode, clicking card means selection, not navigation/text selection.
     e.preventDefault();
     e.stopPropagation();
 
@@ -225,8 +214,6 @@ function MovieCard({
   };
 
   const handleLinkClick = (e) => {
-    // In admin selection mode, card click is used for multi-select.
-    // Admin can exit Admin Mode to open the movie page normally.
     if (showAdminControls) {
       e.preventDefault();
       e.stopPropagation();
@@ -240,7 +227,8 @@ function MovieCard({
   return (
     <article
       className={[
-        'border border-border p-2 mobile:p-2 hover:scale-95 transitions relative rounded mobile:rounded-md overflow-hidden group',
+        // z-0 creates a local stacking context so card badges/overlays cannot cover sticky navbar.
+        'relative z-0 border border-border p-2 mobile:p-2 hover:scale-95 transitions rounded mobile:rounded-md overflow-hidden group',
         adminDraggable ? 'select-none touch-none' : '',
         showAdminControls ? 'select-none' : '',
         isSelected ? 'ring-2 ring-customPurple' : '',
@@ -253,7 +241,6 @@ function MovieCard({
       onPointerUp={handleCardPointerUp}
       onPointerCancel={handleCardPointerUp}
     >
-      {/* ✅ Fast drag handle for admin reorder */}
       {adminDraggable ? (
         <button
           data-admin-control="true"
@@ -267,7 +254,6 @@ function MovieCard({
         </button>
       ) : null}
 
-      {/* ✅ Admin controls (top-right) */}
       {showAdminControls && (
         <div
           data-admin-control="true"
@@ -351,7 +337,6 @@ function MovieCard({
         </div>
       )}
 
-      {/* ✅ thumbnail badge */}
       {movie?.thumbnailInfo ? (
         <div
           className={`absolute ${badgeTopClass} left-2 bg-customPurple text-white text-[10px] px-2 py-0.5 rounded-sm font-semibold z-20 max-w-[90%] truncate whitespace-nowrap overflow-hidden`}
@@ -370,7 +355,6 @@ function MovieCard({
         onTouchStart={prefetchThis}
         className="block"
       >
-        {/* Poster */}
         <div className="relative w-full aspect-[2/3] mobile:aspect-[100/154] bg-black rounded-sm overflow-hidden">
           <SafeImage
             src={movie?.titleImage}
@@ -384,7 +368,6 @@ function MovieCard({
           />
         </div>
 
-        {/* Bottom overlay */}
         <div className="absolute flex items-center justify-between gap-2 bottom-0 right-0 left-0 bg-main/60 text-white px-4 mobile:px-1 py-2 h-12">
           <h3
             className="font-semibold text-xs mobile:pl-1 mobile:text-[11px] line-clamp-2 flex-grow mr-2"

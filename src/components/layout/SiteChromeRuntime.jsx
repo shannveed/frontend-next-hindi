@@ -44,6 +44,13 @@ const POPUP_COOLDOWN_MS = 20000;
 const POPUP_RETRY_MS = 2000;
 
 const TELEGRAM_URL = process.env.NEXT_PUBLIC_TELEGRAM_CHANNEL_URL || '';
+
+// Default false: Telegram popup disabled unless explicitly enabled.
+const TELEGRAM_POPUP_ENABLED =
+  String(process.env.NEXT_PUBLIC_TELEGRAM_POPUP_ENABLED || 'false')
+    .trim()
+    .toLowerCase() === 'true';
+
 const ADS_ENABLED = process.env.NEXT_PUBLIC_ADS_ENABLED === 'true';
 
 const isStandaloneMode = () => {
@@ -325,7 +332,7 @@ export default function SiteChromeRuntime() {
   }, [pathname, isIOS, deferredPrompt, schedulePopup]);
 
   useEffect(() => {
-    if (!TELEGRAM_URL) return;
+    if (!TELEGRAM_POPUP_ENABLED || !TELEGRAM_URL) return;
 
     const shouldSkip = () => {
       if (isAdmin) return true;
@@ -385,7 +392,7 @@ export default function SiteChromeRuntime() {
         />
       ) : null}
 
-      {TELEGRAM_URL && !isAdmin && telegramOpen ? (
+      {TELEGRAM_POPUP_ENABLED && TELEGRAM_URL && !isAdmin && telegramOpen ? (
         <ChannelPopup
           open={telegramOpen}
           onClose={() => {
