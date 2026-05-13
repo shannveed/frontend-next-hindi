@@ -1,7 +1,14 @@
 // src/components/home/HomeAdminPanelClient.jsx
 'use client';
 
-import React, { useContext, useEffect, useMemo, useState } from 'react';
+import React, {
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
 import { IoClose } from 'react-icons/io5';
@@ -79,6 +86,36 @@ export default function HomeAdminPanelClient({
   const [pendingReorder, setPendingReorder] = useState(false);
   const [savingOrder, setSavingOrder] = useState(false);
 
+  // Fast pointer reorder refs
+  const localOrderRef = useRef([]);
+  const dragStateRef = useRef({ active: false, id: null });
+  const lastDragTargetRef = useRef('');
+  const bodyUserSelectRef = useRef('');
+  const userSelectLockedRef = useRef(false);
+
+  const lockUserSelect = useCallback(() => {
+    if (typeof document === 'undefined') return;
+
+    if (!userSelectLockedRef.current) {
+      bodyUserSelectRef.current = document.body.style.userSelect || '';
+      document.body.style.userSelect = 'none';
+      userSelectLockedRef.current = true;
+    }
+  }, []);
+
+  const unlockUserSelect = useCallback(() => {
+    if (typeof document === 'undefined') return;
+
+    if (userSelectLockedRef.current) {
+      document.body.style.userSelect = bodyUserSelectRef.current;
+      userSelectLockedRef.current = false;
+    }
+  }, []);
+
+  useEffect(() => {
+    localOrderRef.current = localOrder;
+  }, [localOrder]);
+
   useEffect(() => {
     try {
       const stored = sessionStorage.getItem('homeDesktopTab');
@@ -132,15 +169,135 @@ export default function HomeAdminPanelClient({
     };
   }, [isAdmin, token]);
 
+  const finishTrendingDrag = useCallback(() => {
+    dragStateRef.current = { active: false, id: null };
+    lastDragTargetRef.current = '';
+    setDraggedId(null);
+    unlockUserSelect();
+
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('pointerup', finishTrendingDrag);
+      window.removeEventListener('pointercancel', finishTrendingDrag);
+      window.removeEventListener('blur', finishTrendingDrag);
+    }
+  }, [unlockUserSelect]);
+
+  const onTrendingDragStart = useCallback(
+    (event, id) => {
+      if (!isAdmin || !editTrending) return;
+
+      const safeId = String(id || '').trim();
+      if (!safeId) return;
+
+      event?.preventDefault?.();
+      event?.stopPropagation?.();
+
+      if (!localOrderRef.current.length) {
+        const next = [
+          ...(Array.isArray(latestNewMovies) ? latestNewMovies : []),
+        ];
+        localOrderRef.current = next;
+        setLocalOrder(next);
+      }
+
+      dragStateRef.current = { active: true, id: safeId };
+      lastDragTargetRef.current = '';
+      setDraggedId(safeId);
+      lockUserSelect();
+
+      if (typeof window !== 'undefined') {
+        window.addEventListener('pointerup', finishTrendingDrag, {
+          once: true,
+        });
+        window.addEventListener('pointercancel', finishTrendingDrag, {
+          once: true,
+        });
+        window.addEventListener('blur', finishTrendingDrag, { once: true });
+      }
+    },
+    [
+      isAdmin,
+      editTrending,
+      latestNewMovies,
+      lockUserSelect,
+      finishTrendingDrag,
+    ]
+  );
+
+  const onTrendingDragEnter = useCallback(
+    (event, targetId) => {
+      const target = String(targetId || '').trim();
+      const dragged = dragStateRef.current.id;
+
+      if (!dragStateRef.current.active) return;
+      if (!dragged || !target) return;
+
+      if (typeof event?.buttons === 'number' && event.buttons === 0) {
+        finishTrendingDrag();
+        return;
+      }
+
+      if (dragged === target) return;
+      if (lastDragTargetRef.current === target) return;
+
+      lastDragTargetRef.current = target;
+
+      setLocalOrder((prev) => {
+        const source = prev.length ? prev : localOrderRef.current;
+
+        const from = source.findIndex((m) => String(m?._id) === dragged);
+        const to = source.findIndex((m) => String(m?._id) === target);
+
+        if (from < 0 || to < 0 || from === to) return prev;
+
+        const next = [...source];
+        const [moved] = next.splice(from, 1);
+        next.splice(to, 0, moved);
+
+        localOrderRef.current = next;
+
+        return next;
+      });
+
+      setPendingReorder(true);
+    },
+    [finishTrendingDrag]
+  );
+
+  useEffect(() => {
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('pointerup', finishTrendingDrag);
+        window.removeEventListener('pointercancel', finishTrendingDrag);
+        window.removeEventListener('blur', finishTrendingDrag);
+      }
+
+      unlockUserSelect();
+    };
+  }, [finishTrendingDrag, unlockUserSelect]);
+
   // sync reorder list
   useEffect(() => {
     if (isAdmin && editTrending) {
-      setLocalOrder([...(Array.isArray(latestNewMovies) ? latestNewMovies : [])]);
+      const next = [
+        ...(Array.isArray(latestNewMovies) ? latestNewMovies : []),
+      ];
+
+      setLocalOrder(next);
+      localOrderRef.current = next;
+
       setPendingReorder(false);
+      dragStateRef.current = { active: false, id: null };
+      lastDragTargetRef.current = '';
+      setDraggedId(null);
     } else {
       setLocalOrder([]);
+      localOrderRef.current = [];
+
       setPendingReorder(false);
       setDraggedId(null);
+      dragStateRef.current = { active: false, id: null };
+      lastDragTargetRef.current = '';
     }
   }, [isAdmin, editTrending, latestNewMovies]);
 
@@ -179,6 +336,9 @@ export default function HomeAdminPanelClient({
       await setLatestNewMovies(token, [movieId], false);
       setLatestNewMoviesState((prev) => prev.filter((m) => m._id !== movieId));
       setLocalOrder((prev) => prev.filter((m) => m._id !== movieId));
+      localOrderRef.current = localOrderRef.current.filter(
+        (m) => m._id !== movieId
+      );
       toast.success('Removed from Trending');
     } catch (e) {
       toast.error(e?.message || 'Failed to remove from Trending');
@@ -187,33 +347,16 @@ export default function HomeAdminPanelClient({
     }
   };
 
-  // drag reorder
-  const onDragStart = (_e, id) => setDraggedId(id);
-
-  const onDragEnter = (_e, targetId) => {
-    if (!draggedId || draggedId === targetId) return;
-
-    setLocalOrder((prev) => {
-      const from = prev.findIndex((m) => m._id === draggedId);
-      const to = prev.findIndex((m) => m._id === targetId);
-      if (from < 0 || to < 0) return prev;
-
-      const next = [...prev];
-      const [moved] = next.splice(from, 1);
-      next.splice(to, 0, moved);
-      return next;
-    });
-
-    setPendingReorder(true);
-  };
-
   const saveTrendingOrder = async () => {
     if (!isAdmin || !token) return;
     if (!localOrder.length) return;
 
     try {
       setSavingOrder(true);
-      await reorderLatestNewMovies(token, localOrder.map((m) => m._id));
+      await reorderLatestNewMovies(
+        token,
+        localOrder.map((m) => m._id)
+      );
       toast.success('Trending order saved');
       setPendingReorder(false);
 
@@ -287,6 +430,13 @@ export default function HomeAdminPanelClient({
                 </button>
               )}
             </div>
+
+            {editTrending ? (
+              <p className="text-xs text-dryGray mt-3">
+                Drag titles using the green grip icon on each card. This uses a
+                fast pointer-based reorder, so it should feel smooth and instant.
+              </p>
+            ) : null}
           </div>
         )}
 
@@ -309,7 +459,7 @@ export default function HomeAdminPanelClient({
                       handleRemoveFromTrending(m._id);
                     }}
                     disabled={removingLatestNewId === m._id}
-                    className="absolute top-2 right-2 z-30 w-9 h-9 flex-colo rounded-full bg-red-600/85 hover:bg-red-600 text-white disabled:opacity-60"
+                    className="absolute top-2 right-2 z-40 w-9 h-9 flex-colo rounded-full bg-red-600/85 hover:bg-red-600 text-white disabled:opacity-60"
                   >
                     {removingLatestNewId === m._id ? (
                       <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -319,21 +469,14 @@ export default function HomeAdminPanelClient({
                   </button>
                 )}
 
-                <div
-                  draggable={isAdmin && editTrending}
-                  onDragStart={(e) => onDragStart(e, m._id)}
-                  onDragEnter={(e) => onDragEnter(e, m._id)}
-                  onDragOver={(e) =>
-                    isAdmin && editTrending ? e.preventDefault() : null
-                  }
-                  className={
-                    isAdmin && editTrending
-                      ? 'cursor-grab active:cursor-grabbing'
-                      : ''
-                  }
-                >
-                  <MovieCard movie={m} />
-                </div>
+                <MovieCard
+                  movie={m}
+                  className={draggedId === m._id ? 'opacity-80' : ''}
+                  adminDraggable={isAdmin && editTrending}
+                  onAdminDragStart={onTrendingDragStart}
+                  onAdminDragEnter={onTrendingDragEnter}
+                  onAdminDragEnd={finishTrendingDrag}
+                />
               </div>
             ))}
         </div>
@@ -348,7 +491,10 @@ export default function HomeAdminPanelClient({
         </div>
 
         {mobile ? (
-          <EffectiveGateSquareAd refreshKey="home-mobile-trending" className="px-0" />
+          <EffectiveGateSquareAd
+            refreshKey="home-mobile-trending"
+            className="px-0"
+          />
         ) : (
           <EffectiveGateNativeBanner refreshKey="home-desktop-trending" />
         )}
@@ -395,7 +541,10 @@ export default function HomeAdminPanelClient({
         </div>
 
         {mobile ? (
-          <EffectiveGateSquareAd refreshKey="home-mobile-newreleases" className="px-0" />
+          <EffectiveGateSquareAd
+            refreshKey="home-mobile-newreleases"
+            className="px-0"
+          />
         ) : (
           <EffectiveGateNativeBanner refreshKey="home-desktop-newreleases" />
         )}
@@ -433,7 +582,10 @@ export default function HomeAdminPanelClient({
         title="Korean Drama"
         browseByValues={['Korean Drama (Korean)']}
       />
-      <BrowseSwiperSection title="Korean" browseByValues={['Korean (English)']} />
+      <BrowseSwiperSection
+        title="Korean"
+        browseByValues={['Korean (English)']}
+      />
       <BrowseSwiperSection
         title="Korean Hindi"
         browseByValues={['Korean (Hindi Dubbed)']}
@@ -465,7 +617,10 @@ export default function HomeAdminPanelClient({
       />
 
       {mobile ? (
-        <EffectiveGateSquareAd refreshKey="home-mobile-browseby" className="px-0" />
+        <EffectiveGateSquareAd
+          refreshKey="home-mobile-browseby"
+          className="px-0"
+        />
       ) : (
         <EffectiveGateNativeBanner refreshKey="home-desktop-browseby" />
       )}

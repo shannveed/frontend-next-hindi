@@ -1,7 +1,12 @@
-// frontend-next/src/components/movies/MoviesClient.jsx
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import toast from 'react-hot-toast';
 import { useRouter } from 'next/navigation';
 
@@ -14,7 +19,6 @@ import EffectiveGateNativeBanner, {
 } from '../ads/EffectiveGateNativeBanner';
 
 import { getUserInfo } from '../../lib/client/auth';
-import { apiFetch } from '../../lib/client/apiFetch';
 import {
   getMoviesAdmin,
   moveMoviesToPage,
@@ -29,27 +33,6 @@ const toNum = (v, fallback = 1) => {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 };
 
-const buildPublicMoviesQueryString = (q = {}) => {
-  const p = new URLSearchParams();
-
-  const set = (k, v) => {
-    if (v === undefined || v === null || v === '') return;
-    p.set(k, String(v));
-  };
-
-  set('type', q.type);
-  set('category', q.category);
-  set('time', q.time);
-  set('language', q.language);
-  set('rate', q.rate);
-  set('year', q.year);
-  set('browseBy', q.browseBy);
-  set('search', q.search);
-  set('pageNumber', q.pageNumber || 1);
-
-  return p.toString();
-};
-
 export default function MoviesClient({
   initialQuery = {},
   initialData = {},
@@ -59,8 +42,6 @@ export default function MoviesClient({
   const router = useRouter();
 
   const [userInfo, setUserInfo] = useState(null);
-  const [authReady, setAuthReady] = useState(false);
-
   const token = userInfo?.token || null;
   const isAdmin = !!userInfo?.isAdmin;
 
@@ -80,16 +61,47 @@ export default function MoviesClient({
 
   const [selectedIds, setSelectedIds] = useState([]);
 
+  // refs for smooth pointer interactions
+  const localOrderRef = useRef([]);
+  const dragStateRef = useRef({ active: false, id: null });
+  const lastDragTargetRef = useRef('');
+
+  const selectionPaintRef = useRef({ active: false, mode: 'select' });
+  const selectedIdsRef = useRef([]);
+  const bodyUserSelectRef = useRef('');
+  const userSelectLockedRef = useRef(false);
+
+  const lockUserSelect = useCallback(() => {
+    if (typeof document === 'undefined') return;
+
+    if (!userSelectLockedRef.current) {
+      bodyUserSelectRef.current = document.body.style.userSelect || '';
+      document.body.style.userSelect = 'none';
+      userSelectLockedRef.current = true;
+    }
+  }, []);
+
+  const unlockUserSelect = useCallback(() => {
+    if (typeof document === 'undefined') return;
+
+    if (userSelectLockedRef.current) {
+      document.body.style.userSelect = bodyUserSelectRef.current;
+      userSelectLockedRef.current = false;
+    }
+  }, []);
+
+  useEffect(() => {
+    selectedIdsRef.current = selectedIds;
+  }, [selectedIds]);
+
+  useEffect(() => {
+    localOrderRef.current = localOrder;
+  }, [localOrder]);
+
   // update userInfo from localStorage
   useEffect(() => {
     setUserInfo(getUserInfo());
-    setAuthReady(true);
-
-    const onStorage = () => {
-      setUserInfo(getUserInfo());
-      setAuthReady(true);
-    };
-
+    const onStorage = () => setUserInfo(getUserInfo());
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
   }, []);
@@ -102,14 +114,22 @@ export default function MoviesClient({
 
     setAdminMode(false);
     setLocalOrder([]);
+    localOrderRef.current = [];
+
     setPendingReorder(false);
     setDraggedId(null);
     setSelectedIds([]);
+
+    dragStateRef.current = { active: false, id: null };
+    lastDragTargetRef.current = '';
+    selectionPaintRef.current = { active: false, mode: 'select' };
   }, [initialData]);
 
-  const queryKey = useMemo(() => JSON.stringify(initialQuery || {}), [initialQuery]);
-
   // admin sees drafts too (client-side replace list)
+  const queryKey = useMemo(() => JSON.stringify(initialQuery || {}), [
+    initialQuery,
+  ]);
+
   useEffect(() => {
     if (!isAdmin || !token) return;
 
@@ -133,56 +153,204 @@ export default function MoviesClient({
     };
   }, [isAdmin, token, queryKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /**
-   * PUBLIC self-healing refresh
-   *
-   * Why:
-   * - Static paginated routes can occasionally remain stale after bulk create,
-   *   especially when new previousHit titles are appended to the end pages.
-   * - Search hits fresh API data, but /movies/page/N might still render old HTML.
-   *
-   * This silent refresh keeps SEO SSR intact, while ensuring users see fresh data.
-   */
-  useEffect(() => {
-    if (!authReady) return;
-    if (isAdmin && token) return;
-
-    let cancelled = false;
-
-    (async () => {
-      try {
-        const qs = buildPublicMoviesQueryString(initialQuery);
-        const data = await apiFetch(`/api/movies?${qs}`, {
-          cache: 'no-store',
-          bustCache: true,
-        });
-
-        if (cancelled || !data) return;
-
-        setMovies(Array.isArray(data?.movies) ? data.movies : []);
-        setPage(toNum(data?.page, 1));
-        setPages(toNum(data?.pages, 1));
-      } catch {
-        // keep SSR data if refresh fails
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [authReady, isAdmin, token, queryKey, initialQuery]);
-
   // admin reorder list sync
   useEffect(() => {
     if (isAdmin && adminMode) {
-      setLocalOrder([...movies]);
+      const next = [...movies];
+      setLocalOrder(next);
+      localOrderRef.current = next;
       setPendingReorder(false);
     } else {
       setLocalOrder([]);
+      localOrderRef.current = [];
       setPendingReorder(false);
       setDraggedId(null);
+      dragStateRef.current = { active: false, id: null };
+      lastDragTargetRef.current = '';
     }
   }, [isAdmin, adminMode, movies]);
+
+  const finishSelectionPaint = useCallback(() => {
+    selectionPaintRef.current = { active: false, mode: 'select' };
+    unlockUserSelect();
+
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('pointerup', finishSelectionPaint);
+      window.removeEventListener('pointercancel', finishSelectionPaint);
+      window.removeEventListener('blur', finishSelectionPaint);
+    }
+  }, [unlockUserSelect]);
+
+  const applyPaintSelection = useCallback((id, mode = 'select') => {
+    const safeId = String(id || '').trim();
+    if (!safeId) return;
+
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+
+      if (mode === 'deselect') next.delete(safeId);
+      else next.add(safeId);
+
+      return Array.from(next);
+    });
+  }, []);
+
+  const startSelectionPaint = useCallback(
+    (event, id) => {
+      if (!isAdmin || !adminMode) return;
+      if (!id) return;
+      if (dragStateRef.current.active) return;
+
+      const mode = event?.ctrlKey || event?.metaKey ? 'deselect' : 'select';
+
+      selectionPaintRef.current = { active: true, mode };
+      applyPaintSelection(id, mode);
+      lockUserSelect();
+
+      if (typeof window !== 'undefined') {
+        window.addEventListener('pointerup', finishSelectionPaint, {
+          once: true,
+        });
+        window.addEventListener('pointercancel', finishSelectionPaint, {
+          once: true,
+        });
+        window.addEventListener('blur', finishSelectionPaint, { once: true });
+      }
+    },
+    [
+      isAdmin,
+      adminMode,
+      applyPaintSelection,
+      lockUserSelect,
+      finishSelectionPaint,
+    ]
+  );
+
+  const continueSelectionPaint = useCallback(
+    (event, id) => {
+      const state = selectionPaintRef.current;
+      if (!state.active) return;
+
+      // If mouse button is no longer down, stop painting.
+      if (typeof event?.buttons === 'number' && event.buttons === 0) {
+        finishSelectionPaint();
+        return;
+      }
+
+      const mode = event?.ctrlKey || event?.metaKey ? 'deselect' : state.mode;
+      applyPaintSelection(id, mode);
+    },
+    [applyPaintSelection, finishSelectionPaint]
+  );
+
+  const finishAdminDrag = useCallback(() => {
+    dragStateRef.current = { active: false, id: null };
+    lastDragTargetRef.current = '';
+    setDraggedId(null);
+    unlockUserSelect();
+
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('pointerup', finishAdminDrag);
+      window.removeEventListener('pointercancel', finishAdminDrag);
+      window.removeEventListener('blur', finishAdminDrag);
+    }
+  }, [unlockUserSelect]);
+
+  const onAdminDragStart = useCallback(
+    (event, id) => {
+      if (!isAdmin || !adminMode) return;
+
+      const safeId = String(id || '').trim();
+      if (!safeId) return;
+
+      event?.preventDefault?.();
+      event?.stopPropagation?.();
+
+      // Make sure local order exists before drag begins.
+      if (!localOrderRef.current.length) {
+        const next = [...movies];
+        localOrderRef.current = next;
+        setLocalOrder(next);
+      }
+
+      dragStateRef.current = { active: true, id: safeId };
+      lastDragTargetRef.current = '';
+      setDraggedId(safeId);
+      lockUserSelect();
+
+      if (typeof window !== 'undefined') {
+        window.addEventListener('pointerup', finishAdminDrag, { once: true });
+        window.addEventListener('pointercancel', finishAdminDrag, {
+          once: true,
+        });
+        window.addEventListener('blur', finishAdminDrag, { once: true });
+      }
+    },
+    [isAdmin, adminMode, movies, lockUserSelect, finishAdminDrag]
+  );
+
+  const onAdminDragEnter = useCallback(
+    (event, targetId) => {
+      const target = String(targetId || '').trim();
+      const dragged = dragStateRef.current.id;
+
+      if (!dragStateRef.current.active) return;
+      if (!dragged || !target) return;
+
+      // If mouse button is released outside window, stop drag.
+      if (typeof event?.buttons === 'number' && event.buttons === 0) {
+        finishAdminDrag();
+        return;
+      }
+
+      if (dragged === target) return;
+      if (lastDragTargetRef.current === target) return;
+
+      lastDragTargetRef.current = target;
+
+      setLocalOrder((prev) => {
+        const source = prev.length ? prev : localOrderRef.current;
+        const from = source.findIndex((m) => String(m?._id) === dragged);
+        const to = source.findIndex((m) => String(m?._id) === target);
+
+        if (from < 0 || to < 0 || from === to) return prev;
+
+        const next = [...source];
+        const [moved] = next.splice(from, 1);
+        next.splice(to, 0, moved);
+
+        localOrderRef.current = next;
+
+        return next;
+      });
+
+      setPendingReorder(true);
+    },
+    [finishAdminDrag]
+  );
+
+  useEffect(() => {
+    if (!adminMode) {
+      finishSelectionPaint();
+      finishAdminDrag();
+    }
+  }, [adminMode, finishSelectionPaint, finishAdminDrag]);
+
+  useEffect(() => {
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('pointerup', finishSelectionPaint);
+        window.removeEventListener('pointercancel', finishSelectionPaint);
+        window.removeEventListener('blur', finishSelectionPaint);
+
+        window.removeEventListener('pointerup', finishAdminDrag);
+        window.removeEventListener('pointercancel', finishAdminDrag);
+        window.removeEventListener('blur', finishAdminDrag);
+      }
+
+      unlockUserSelect();
+    };
+  }, [finishSelectionPaint, finishAdminDrag, unlockUserSelect]);
 
   const displayMovies =
     isAdmin && adminMode && localOrder.length ? localOrder : movies;
@@ -229,51 +397,33 @@ export default function MoviesClient({
 
   // selection
   const toggleSelect = (id) => {
+    const safeId = String(id || '').trim();
+    if (!safeId) return;
+
     setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+      prev.includes(safeId)
+        ? prev.filter((x) => x !== safeId)
+        : [...prev, safeId]
     );
   };
 
   const clearSelection = () => setSelectedIds([]);
-  const bulkOrSingle = (baseId) => (selectedIds.length ? selectedIds : [baseId]);
-
-  // drag reorder
-  const onAdminDragStart = (e, id) => {
-    try {
-      e.dataTransfer.effectAllowed = 'move';
-    } catch { }
-    setDraggedId(id);
-  };
-
-  const onAdminDragEnter = (_e, targetId) => {
-    if (!draggedId || draggedId === targetId) return;
-
-    setLocalOrder((prev) => {
-      const from = prev.findIndex((m) => m._id === draggedId);
-      const to = prev.findIndex((m) => m._id === targetId);
-      if (from < 0 || to < 0) return prev;
-
-      const next = [...prev];
-      const [moved] = next.splice(from, 1);
-      next.splice(to, 0, moved);
-      return next;
-    });
-
-    setPendingReorder(true);
-  };
-
-  const onAdminDragEnd = () => setDraggedId(null);
+  const bulkOrSingle = (baseId) =>
+    selectedIds.length ? selectedIds : [baseId];
 
   const saveOrder = async () => {
     if (!isAdmin || !token) return;
+
     try {
       setSaving(true);
+
       await reorderMoviesInPage(
         token,
         page,
         localOrder.map((m) => m._id),
         initialQuery
       );
+
       toast.success('Order saved for this page');
       setPendingReorder(false);
       router.refresh();
@@ -286,6 +436,7 @@ export default function MoviesClient({
 
   const addToTrending = async (baseId) => {
     if (!isAdmin || !token) return;
+
     try {
       await setLatestNewMovies(token, bulkOrSingle(baseId), true);
       toast.success('Added to Latest New');
@@ -297,6 +448,7 @@ export default function MoviesClient({
 
   const addToBanner = async (baseId) => {
     if (!isAdmin || !token) return;
+
     try {
       await setBannerMovies(token, bulkOrSingle(baseId), true);
       toast.success('Added to Banner');
@@ -308,6 +460,7 @@ export default function MoviesClient({
 
   const moveToAnyPage = async (baseId, targetPage) => {
     if (!isAdmin || !token) return;
+
     const tp = toNum(targetPage, 1);
 
     try {
@@ -339,6 +492,8 @@ export default function MoviesClient({
               clearSelection();
               setPendingReorder(false);
               setDraggedId(null);
+              dragStateRef.current = { active: false, id: null };
+              selectionPaintRef.current = { active: false, mode: 'select' };
             }}
             className={`px-4 py-2 text-sm rounded border transitions ${adminMode
                 ? 'bg-customPurple border-customPurple text-white'
@@ -350,7 +505,8 @@ export default function MoviesClient({
 
           {adminMode && selectedIds.length > 0 && (
             <div className="text-sm text-white">
-              <span className="font-semibold">{selectedIds.length}</span> selected
+              <span className="font-semibold">{selectedIds.length}</span>{' '}
+              selected
               <button
                 type="button"
                 onClick={clearSelection}
@@ -371,6 +527,14 @@ export default function MoviesClient({
               {saving ? 'Saving...' : 'Save Order'}
             </button>
           )}
+
+          {adminMode ? (
+            <p className="basis-full text-xs text-dryGray">
+              Selection: left-click and move over cards to select. Hold Ctrl/Cmd
+              and move over cards to deselect. Reorder: drag from the green grip
+              icon on each card.
+            </p>
+          ) : null}
         </div>
       )}
 
@@ -389,8 +553,9 @@ export default function MoviesClient({
               <MovieCard
                 key={m._id}
                 movie={m}
+                className={draggedId === m._id ? 'opacity-80' : ''}
                 showAdminControls={isAdmin && adminMode}
-                isSelected={selectedIds.includes(m._id)}
+                isSelected={selectedIds.includes(String(m._id))}
                 onSelectToggle={toggleSelect}
                 totalPages={pages}
                 onMoveToPageClick={(movieId, p) => moveToAnyPage(movieId, p)}
@@ -399,7 +564,9 @@ export default function MoviesClient({
                 adminDraggable={isAdmin && adminMode}
                 onAdminDragStart={onAdminDragStart}
                 onAdminDragEnter={onAdminDragEnter}
-                onAdminDragEnd={onAdminDragEnd}
+                onAdminDragEnd={finishAdminDrag}
+                onAdminSelectPointerDown={startSelectionPaint}
+                onAdminSelectPointerEnter={continueSelectionPaint}
               />
             ))}
           </div>

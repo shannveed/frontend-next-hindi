@@ -10,7 +10,7 @@ import React, {
 } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { FaHeart } from 'react-icons/fa';
+import { FaGripVertical, FaHeart } from 'react-icons/fa';
 import { TbChevronDown } from 'react-icons/tb';
 import toast from 'react-hot-toast';
 
@@ -19,6 +19,24 @@ import { getUserInfo } from '../../lib/client/auth';
 import { likeMovie } from '../../lib/client/users';
 import { FAVORITES_UPDATED_EVENT } from '../../lib/events';
 import { isFavoriteId } from '../../lib/client/favoritesCache';
+
+const ADMIN_CONTROL_SELECTOR =
+  '[data-admin-control="true"], button, input, select, textarea, [role="button"]';
+
+const isAdminControlTarget = (target) => {
+  if (!target || typeof target.closest !== 'function') return false;
+  return !!target.closest(ADMIN_CONTROL_SELECTOR);
+};
+
+const isPrimaryPointer = (event) => {
+  if (!event) return false;
+
+  // Mouse: button 0 = left click.
+  // Touch/Pen pointer events usually also report button 0.
+  if (typeof event.button === 'number') return event.button === 0;
+
+  return true;
+};
 
 function MovieCard({
   movie,
@@ -37,11 +55,15 @@ function MovieCard({
   onMoveToLatestNewClick,
   onMoveToBannerClick,
 
-  // ✅ Admin drag reorder (React parity)
+  // ✅ Fast pointer-based admin reorder
   adminDraggable = false,
   onAdminDragStart,
   onAdminDragEnter,
   onAdminDragEnd,
+
+  // ✅ Windows-style paint select / ctrl deselect
+  onAdminSelectPointerDown,
+  onAdminSelectPointerEnter,
 }) {
   const router = useRouter();
 
@@ -163,34 +185,96 @@ function MovieCard({
     onMoveToPageClick?.(movie?._id, p);
   };
 
+  const handleAdminDragPointerDown = (e) => {
+    if (!adminDraggable) return;
+    if (!isPrimaryPointer(e)) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    onAdminDragStart?.(e, movie?._id);
+  };
+
+  const handleCardPointerDown = (e) => {
+    if (!showAdminControls) return;
+    if (typeof onAdminSelectPointerDown !== 'function') return;
+    if (!isPrimaryPointer(e)) return;
+    if (isAdminControlTarget(e.target)) return;
+
+    // In admin mode, clicking card means selection, not navigation/text selection.
+    e.preventDefault();
+    e.stopPropagation();
+
+    onAdminSelectPointerDown(e, movie?._id);
+  };
+
+  const handleCardPointerEnter = (e) => {
+    if (adminDraggable) {
+      onAdminDragEnter?.(e, movie?._id);
+    }
+
+    if (showAdminControls && typeof onAdminSelectPointerEnter === 'function') {
+      onAdminSelectPointerEnter(e, movie?._id);
+    }
+  };
+
+  const handleCardPointerUp = (e) => {
+    if (adminDraggable) {
+      onAdminDragEnd?.(e);
+    }
+  };
+
+  const handleLinkClick = (e) => {
+    // In admin selection mode, card click is used for multi-select.
+    // Admin can exit Admin Mode to open the movie page normally.
+    if (showAdminControls) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  };
+
   if (!movie) return null;
+
+  const badgeTopClass = adminDraggable ? 'top-12' : 'top-2';
 
   return (
     <article
       className={[
         'border border-border p-2 mobile:p-2 hover:scale-95 transitions relative rounded mobile:rounded-md overflow-hidden group',
-        adminDraggable ? 'cursor-grab active:cursor-grabbing' : '',
+        adminDraggable ? 'select-none touch-none' : '',
+        showAdminControls ? 'select-none' : '',
         isSelected ? 'ring-2 ring-customPurple' : '',
         className,
       ].join(' ')}
-      draggable={adminDraggable}
-      onDragStart={
-        adminDraggable
-          ? (e) => onAdminDragStart && onAdminDragStart(e, movie._id)
-          : undefined
-      }
-      onDragEnter={
-        adminDraggable
-          ? (e) => onAdminDragEnter && onAdminDragEnter(e, movie._id)
-          : undefined
-      }
-      onDragEnd={adminDraggable ? (e) => onAdminDragEnd?.(e) : undefined}
-      onDragOver={adminDraggable ? (e) => e.preventDefault() : undefined}
+      draggable={false}
+      onDragStart={(e) => e.preventDefault()}
+      onPointerDown={handleCardPointerDown}
+      onPointerEnter={handleCardPointerEnter}
+      onPointerUp={handleCardPointerUp}
+      onPointerCancel={handleCardPointerUp}
     >
+      {/* ✅ Fast drag handle for admin reorder */}
+      {adminDraggable ? (
+        <button
+          data-admin-control="true"
+          type="button"
+          onPointerDown={handleAdminDragPointerDown}
+          className="absolute top-2 left-2 z-30 w-9 h-9 flex items-center justify-center rounded-md bg-customPurple/90 hover:bg-customPurple text-white border border-white/10 shadow cursor-grab active:cursor-grabbing"
+          title="Drag to reorder"
+          aria-label="Drag to reorder"
+        >
+          <FaGripVertical className="text-sm" />
+        </button>
+      ) : null}
+
       {/* ✅ Admin controls (top-right) */}
       {showAdminControls && (
-        <div className="absolute top-2 right-2 z-20 flex items-center gap-1">
+        <div
+          data-admin-control="true"
+          className="absolute top-2 right-2 z-30 flex items-center gap-1"
+        >
           <input
+            data-admin-control="true"
             type="checkbox"
             checked={!!isSelected}
             onChange={handleSelectToggle}
@@ -200,8 +284,9 @@ function MovieCard({
           />
 
           {canShowDropdown && (
-            <div className="relative" ref={dropdownRef}>
+            <div data-admin-control="true" className="relative" ref={dropdownRef}>
               <button
+                data-admin-control="true"
                 type="button"
                 onClick={toggleDropdown}
                 className="w-7 h-7 flex items-center justify-center bg-main/80 hover:bg-customPurple rounded text-white text-xs border border-border"
@@ -215,12 +300,14 @@ function MovieCard({
 
               {dropdownOpen && (
                 <div
-                  className="absolute right-0 top-full mt-1 bg-dry border border-border rounded shadow-lg z-30 min-w-[150px] max-h-56 overflow-y-auto"
+                  data-admin-control="true"
+                  className="absolute right-0 top-full mt-1 bg-dry border border-border rounded shadow-lg z-40 min-w-[150px] max-h-56 overflow-y-auto"
                   onClick={(e) => e.stopPropagation()}
                 >
                   {typeof onMoveToBannerClick === 'function' && (
                     <>
                       <button
+                        data-admin-control="true"
                         type="button"
                         onClick={pickBanner}
                         className="block w-full text-left text-xs px-3 py-2 hover:bg-customPurple text-white transitions"
@@ -234,6 +321,7 @@ function MovieCard({
                   {typeof onMoveToLatestNewClick === 'function' && (
                     <>
                       <button
+                        data-admin-control="true"
                         type="button"
                         onClick={pickLatestNew}
                         className="block w-full text-left text-xs px-3 py-2 hover:bg-customPurple text-white transitions"
@@ -247,6 +335,7 @@ function MovieCard({
                   {pagesList.length > 0 &&
                     pagesList.map((p) => (
                       <button
+                        data-admin-control="true"
                         key={p}
                         type="button"
                         onClick={(e) => pickPage(e, p)}
@@ -262,10 +351,10 @@ function MovieCard({
         </div>
       )}
 
-      {/* ✅ FIXED thumbnail badge */}
+      {/* ✅ thumbnail badge */}
       {movie?.thumbnailInfo ? (
         <div
-          className="absolute top-2 left-2 bg-customPurple text-white text-[10px] px-2 py-0.5 rounded-sm font-semibold z-10 max-w-[90%] truncate whitespace-nowrap overflow-hidden"
+          className={`absolute ${badgeTopClass} left-2 bg-customPurple text-white text-[10px] px-2 py-0.5 rounded-sm font-semibold z-20 max-w-[90%] truncate whitespace-nowrap overflow-hidden`}
           title={movie.thumbnailInfo}
         >
           {movie.thumbnailInfo}
@@ -275,6 +364,8 @@ function MovieCard({
       <Link
         href={href}
         prefetch={false}
+        draggable={false}
+        onClick={handleLinkClick}
         onMouseEnter={prefetchThis}
         onTouchStart={prefetchThis}
         className="block"
@@ -289,6 +380,7 @@ function MovieCard({
             quality={65}
             sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 20vw"
             className="object-cover"
+            draggable={false}
           />
         </div>
 
@@ -303,9 +395,12 @@ function MovieCard({
 
           {showLike ? (
             <button
+              data-admin-control="true"
               onClick={handleLike}
               disabled={liked || liking}
-              className={`mobile:hidden h-7 w-7 flex-colo border-2 border-customPurple rounded px-2 py-1 text-white transitions flex-shrink-0 ${liked ? 'bg-transparent' : 'bg-customPurple hover:bg-transparent'
+              className={`mobile:hidden h-7 w-7 flex-colo border-2 border-customPurple rounded px-2 py-1 text-white transitions flex-shrink-0 ${liked
+                  ? 'bg-transparent'
+                  : 'bg-customPurple hover:bg-transparent'
                 } ${liking ? 'opacity-60 cursor-wait' : ''}`}
               type="button"
               aria-label={liked ? 'Already in favorites' : 'Add to favorites'}
