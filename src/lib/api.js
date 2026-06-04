@@ -354,16 +354,25 @@ export async function getRelatedMoviesAdmin(idOrSlug, token, limit = 20) {
   return Array.isArray(data) ? data : [];
 }
 
-export async function getActorBySlug(slug, { revalidate = 30 } = {}) {
+export async function getActorBySlug(
+  slug,
+  { revalidate = 300, page = 1, limit = 20, sort = 'latest' } = {}
+) {
   const raw = String(slug || '').trim();
   const safe = encodeURIComponent(raw);
   if (!safe) return null;
 
+  const params = new URLSearchParams();
+  params.set('page', String(page || 1));
+  params.set('limit', String(limit || 20));
+  params.set('sort', String(sort || 'latest'));
+
   return fetchJson(
-    `${API}/actors/${safe}`,
+    `${API}/actors/${safe}?${params.toString()}`,
     nextCache(revalidate, [CACHE_TAGS.MOVIES, CACHE_TAGS.ACTORS, actorTag(raw)])
   );
 }
+
 
 /* ============================================================
    BLOG

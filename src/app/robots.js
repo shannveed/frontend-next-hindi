@@ -25,7 +25,6 @@ export default function robots() {
           '/api',
 
           // Crawl-budget cleanup
-          '/actor',
           '/watch',
           '/search',
           '/login',
@@ -42,7 +41,11 @@ export default function robots() {
       },
     ],
 
-    sitemap: [`${SITE_URL}/sitemap-index.xml`, `${SITE_URL}/sitemap.xml`],
+    sitemap: [
+      `${SITE_URL}/sitemap-index.xml`,
+      `${SITE_URL}/sitemap.xml`,
+      `${SITE_URL}/sitemap-actors.xml`,
+    ],
 
     host: SITE_URL,
   };

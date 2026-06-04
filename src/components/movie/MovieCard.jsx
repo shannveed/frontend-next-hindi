@@ -68,7 +68,9 @@ function MovieCard({
   const dropdownRef = useRef(null);
 
   const seg = movie?.slug || movie?._id;
-  const href = seg ? `/movie/${seg}` : '/movies';
+  const href = movie?.href || (seg ? `/movie/${seg}` : '/movies');
+  const isVirtual = !!movie?.isImdbVirtual || !!movie?.isTmdbVirtual;
+
 
   const didPrefetchRef = useRef(false);
   const prefetchThis = useCallback(() => {
@@ -337,7 +339,7 @@ function MovieCard({
         </div>
       )}
 
-      {movie?.thumbnailInfo ? (
+      {movie?.thumbnailInfo && !isVirtual ? (
         <div
           className={`absolute ${badgeTopClass} left-2 bg-customPurple text-white text-[10px] px-2 py-0.5 rounded-sm font-semibold z-20 max-w-[90%] truncate whitespace-nowrap overflow-hidden`}
           title={movie.thumbnailInfo}
@@ -376,14 +378,14 @@ function MovieCard({
             {movie?.name}
           </h3>
 
-          {showLike ? (
+          {showLike && !isVirtual ? (
             <button
               data-admin-control="true"
               onClick={handleLike}
               disabled={liked || liking}
               className={`mobile:hidden h-7 w-7 flex-colo border-2 border-customPurple rounded px-2 py-1 text-white transitions flex-shrink-0 ${liked
-                  ? 'bg-transparent'
-                  : 'bg-customPurple hover:bg-transparent'
+                ? 'bg-transparent'
+                : 'bg-customPurple hover:bg-transparent'
                 } ${liking ? 'opacity-60 cursor-wait' : ''}`}
               type="button"
               aria-label={liked ? 'Already in favorites' : 'Add to favorites'}

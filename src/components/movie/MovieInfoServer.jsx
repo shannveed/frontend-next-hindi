@@ -7,6 +7,7 @@ import {
   FaShareAlt,
   FaCloudDownloadAlt,
 } from 'react-icons/fa';
+import { personSlug } from '../../lib/seo';
 
 import MovieAverageStars from './MovieAverageStars';
 import MovieShareButtonClient from './MovieShareButtonClient';
@@ -121,13 +122,7 @@ function ExternalRatings({ movie }) {
 
 function CastScroller({ casts = [] }) {
   const list = Array.isArray(casts)
-    ? casts
-      .map((cast) => ({
-        name: clean(cast?.name),
-        image: clean(cast?.image),
-      }))
-      .filter((cast) => cast.name)
-      .slice(0, 20)
+    ? casts.filter((c) => c?.name).slice(0, 20)
     : [];
 
   if (!list.length) return null;
@@ -140,31 +135,52 @@ function CastScroller({ casts = [] }) {
       </div>
 
       <div className="flex gap-3 overflow-x-auto pb-2">
-        {list.map((cast, idx) => (
-          <div
-            key={`${cast.name}-${idx}`}
-            className="min-w-[120px] max-w-[160px] bg-main border border-border rounded-lg p-2"
-          >
-            <div className="w-full aspect-[3/4] relative rounded-md overflow-hidden bg-black/40 border border-border">
-              <SafeImage
-                src={cast.image}
-                fallbackCandidates={['/images/placeholder.jpg']}
-                alt={cast.name || 'Actor'}
-                fill
-                sizes="140px"
-                className="object-contain"
-              />
-            </div>
+        {list.map((c, idx) => {
+          const slug = c?.slug || personSlug(c?.name);
+          const href = slug ? `/actor/${slug}` : '';
 
-            <p className="mt-1 text-[11px] font-medium text-white/90 text-center line-clamp-2 leading-tight">
-              {cast.name}
-            </p>
-          </div>
-        ))}
+          const card = (
+            <div className="min-w-[120px] max-w-[160px] bg-main border border-border rounded-lg p-2 hover:border-customPurple transitions">
+              <div className="w-full aspect-[3/4] relative rounded-md overflow-hidden bg-black/40 border border-border">
+                <SafeImage
+                  src={c?.image}
+                  fallbackCandidates={['/images/placeholder.jpg']}
+                  alt={c?.name || 'Actor'}
+                  fill
+                  sizes="140px"
+                  className="object-contain"
+                />
+              </div>
+
+              <p className="mt-1 text-[11px] font-medium text-white/90 text-center line-clamp-2 leading-tight">
+                {c?.name}
+              </p>
+
+              <p className="text-[10px] text-customPurple text-center mt-1">
+                View profile
+              </p>
+            </div>
+          );
+
+          if (!href) {
+            return <div key={`${c?.name || 'cast'}-${idx}`}>{card}</div>;
+          }
+
+          return (
+            <Link
+              key={`${c?.name || 'cast'}-${idx}`}
+              href={href}
+              className="block"
+            >
+              {card}
+            </Link>
+          );
+        })}
       </div>
     </section>
   );
 }
+
 
 export default function MovieInfoServer({ movie }) {
   if (!movie) return null;
